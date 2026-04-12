@@ -1,0 +1,26 @@
+# Environment
+.env
+*.env
+.env.local
+.env.production
+
+# Python
+__pycache__/
+*.pyc
+venv/
+.venv/
+*.egg-info/
+
+# Node
+node_modules/
+.next/
+frontend/.next/
+frontend/node_modules/
+
+# Uploads (student documents - never commit)
+uploads/
+/home/deploy/uploads/
+
+# Keys
+*.pem
+*.key
