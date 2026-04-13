@@ -15,6 +15,11 @@ const geistMono = Geist_Mono({
 export const metadata: Metadata = {
   title: "Datalingo",
   description: "Adaptive data science learning platform",
+  icons: {
+    icon: "/datalingo-icon.svg",
+    shortcut: "/datalingo-icon.svg",
+    apple: "/datalingo-icon.svg",
+  },
 };
 
 export default function RootLayout({

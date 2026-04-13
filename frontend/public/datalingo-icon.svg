@@ -1,0 +1,27 @@
+<svg width="64" height="64" viewBox="0 0 64 64" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="grad" x1="8" y1="8" x2="56" y2="56" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#6E28F5"/>
+      <stop offset="1" stop-color="#513794"/>
+    </linearGradient>
+  </defs>
+
+  <circle cx="32" cy="32" r="28" fill="url(#grad)"/>
+
+  <path
+    d="M18 23.5C18 22.67 18.67 22 19.5 22H28C30.55 22 32 23.45 32 26V42C32 39.45 30.55 38 28 38H19.5C18.67 38 18 38.67 18 39.5V23.5Z"
+    fill="white"
+    fill-opacity="0.98"
+  />
+
+  <path
+    d="M46 23.5C46 22.67 45.33 22 44.5 22H36C33.45 22 32 23.45 32 26V42C32 39.45 33.45 38 36 38H44.5C45.33 38 46 38.67 46 39.5V23.5Z"
+    fill="white"
+    fill-opacity="0.98"
+  />
+
+  <path d="M20 28.5H27" stroke="#6E28F5" stroke-width="1.5" stroke-linecap="round"/>
+  <path d="M20 32.5H27" stroke="#6E28F5" stroke-width="1.5" stroke-linecap="round"/>
+  <path d="M37 28.5H44" stroke="#6E28F5" stroke-width="1.5" stroke-linecap="round"/>
+  <path d="M37 32.5H44" stroke="#6E28F5" stroke-width="1.5" stroke-linecap="round"/>
+</svg>
