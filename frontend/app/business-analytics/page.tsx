@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
+import { Suspense, useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
@@ -94,7 +94,7 @@ function MessageBubble({ message }: { message: LocalMessage }) {
   );
 }
 
-export default function BusinessAnalyticsPage() {
+function BusinessAnalyticsContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const { token, user } = useAuthStore();
@@ -760,5 +760,13 @@ export default function BusinessAnalyticsPage() {
         </main>
       </div>
     </>
+  );
+}
+
+export default function BusinessAnalyticsPage() {
+  return (
+    <Suspense fallback={null}>
+      <BusinessAnalyticsContent />
+    </Suspense>
   );
 }
