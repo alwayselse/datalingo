@@ -1,859 +1,1845 @@
 "use client";
 
-import { useEffect, useRef, useState, useCallback } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import * as THREE from "three";
 import { useAuthStore } from "@/store/auth";
-import Sidebar from "@/components/sidebar";
 
-// ── Types ────────────────────────────────────────────────────────────────────
+declare global {
+  interface Window {
+    THREE?: any;
+  }
+}
 
-interface TopicNode {
+type UnitId = 1 | 2 | 3 | 4;
+type UnitFilter = "all" | UnitId;
+type MasteryState = "locked" | "unassessed" | "explored" | "intermediate" | "advanced";
+
+interface TopicDef {
   id: string;
   name: string;
-  description: string;
-  subtopics: string[];
+  unit: UnitId;
+  order: number;
   prerequisites: string[];
-  unit: 1 | 2 | 3 | 4;
-  p_known: number;
-  assessment_count: number;
-  level: "unassessed" | "beginner" | "intermediate" | "advanced";
+  subtopics: string[];
+  description: string;
 }
 
-interface BATopic {
-  id: number;
-  name: string;
-  unit: 1 | 2 | 3 | 4;
+interface TopicMerged extends TopicDef {
+  p_known: number;
+  mastery_level: string;
+  session_count: number;
+  last_studied_at: string | null;
+  understanding_summary: string | null;
+  misconceptions_count: number;
+  forge_attempts_count: number;
+  state: MasteryState;
+}
+
+interface PalaceRow {
+  topic_id?: string;
+  topic_name?: string;
+  p_known?: number;
+  mastery_level?: string;
+  understanding_summary?: string;
+  session_count?: number;
+  last_studied_at?: string;
+  misconceptions?: unknown[] | number;
+  forge_attempts?: unknown[] | number;
+  name?: string;
+}
+
+interface MasteryRow {
+  topic_id?: string;
+  topic_name?: string;
+  p_known?: number;
+  mastery_level?: string;
+  assessment_count?: number;
+  name?: string;
+}
+
+interface TooltipState {
   x: number;
   y: number;
-  z: number;
+  topicId: string;
 }
 
-interface NodeMesh extends THREE.Mesh {
-  userData: {
-    id: string;
-    baseColor: THREE.Color;
-    glowColor: THREE.Color;
-    baseEmissiveIntensity: number;
-    velocity: THREE.Vector3;
-    targetPos: THREE.Vector3;
+const COLORS = {
+  bg: "#0a0a0f",
+  surface: "#111118",
+  surfaceRaised: "#1a1a24",
+  border: "#2a2a3a",
+  primary: "#7c3aed",
+  textPrimary: "#f0f0f5",
+  textSecondary: "#8b8b9e",
+  textMuted: "#4a4a5e",
+  unit1: "#6e28f5",
+  unit2: "#2563eb",
+  unit3: "#059669",
+  unit4: "#dc2626",
+  success: "#059669",
+  warning: "#d97706",
+};
+
+const SHORT_LABELS: Record<string, string> = {
+  ba_frameworks: "BA Frameworks",
+  customer_data: "Customer Data",
+  data_extraction: "Data Extraction",
+  data_viz_dashboards: "Dashboards",
+  rfm_analysis: "RFM Analysis",
+  customer_seg_clv: "Seg. & CLV",
+  causality_ba: "Causality",
+  experimental_design: "Exp. Design",
+  ab_testing: "A/B Testing",
+  pricing_analytics: "Pricing Analytics",
+  price_elasticity: "Price Elasticity",
+  promo_optimization: "Promo Optim.",
+  time_series_ba: "Time Series",
+  trend_seasonality: "Trend & Seasonality",
+  forecasting_methods: "Forecasting",
+  churn_analytics: "Churn Analytics",
+  inventory_control: "Inventory Control",
+  supply_chain_kpis: "Supply Chain",
+  text_sentiment: "Text & Sentiment",
+  multivariate_testing: "Multivariate Test",
+  ethics_bias: "Ethics & Bias",
+  data_privacy: "Data Privacy",
+  ba_capstone: "BA Capstone",
+};
+
+const UNIT_META: Record<UnitId, { name: string; color: string; center: { x: number; y: number; z: number } }> = {
+  1: { name: "Foundations", color: COLORS.unit1, center: { x: 0, y: 0, z: 0 } },
+  2: { name: "Customer", color: COLORS.unit2, center: { x: 120, y: 40, z: 0 } },
+  3: { name: "Forecasting", color: COLORS.unit3, center: { x: -120, y: 40, z: 0 } },
+  4: { name: "Advanced", color: COLORS.unit4, center: { x: 0, y: 120, z: -20 } },
+};
+
+const TOPICS: TopicDef[] = [
+  {
+    id: "ba_frameworks",
+    name: "Business Analytics Frameworks & Decision-Making",
+    unit: 1,
+    order: 1,
+    prerequisites: [],
+    subtopics: ["CRISP-DM", "Decision frameworks", "KPI mapping"],
+    description: "Core frameworks for turning ambiguous business questions into measurable analytics decisions.",
+  },
+  {
+    id: "customer_data",
+    name: "Customer Data & Analytics Lifecycle",
+    unit: 1,
+    order: 2,
+    prerequisites: [],
+    subtopics: ["Data lifecycle", "Touchpoints", "Governance basics"],
+    description: "How customer data is captured, cleaned, analyzed, and fed back into business operations.",
+  },
+  {
+    id: "data_extraction",
+    name: "Data Extraction & Analytics",
+    unit: 1,
+    order: 3,
+    prerequisites: ["customer_data"],
+    subtopics: ["SQL extraction", "Cleaning", "Feature-ready datasets"],
+    description: "Transforming raw business data into reliable analytical datasets.",
+  },
+  {
+    id: "data_viz_dashboards",
+    name: "Data Visualization & Dashboards",
+    unit: 1,
+    order: 4,
+    prerequisites: ["ba_frameworks"],
+    subtopics: ["Dashboard hierarchy", "Visual encoding", "Narrative design"],
+    description: "Creating decision-ready dashboards that communicate signal over noise.",
+  },
+  {
+    id: "rfm_analysis",
+    name: "RFM Analysis",
+    unit: 2,
+    order: 5,
+    prerequisites: ["customer_data"],
+    subtopics: ["Recency", "Frequency", "Monetary scoring"],
+    description: "Segmenting customers by value and engagement using RFM logic.",
+  },
+  {
+    id: "customer_seg_clv",
+    name: "Customer Segmentation & CLV",
+    unit: 2,
+    order: 6,
+    prerequisites: ["rfm_analysis"],
+    subtopics: ["Behavioral segments", "CLV components", "Retention targeting"],
+    description: "Combining segmentation and lifetime value to prioritize acquisition and retention.",
+  },
+  {
+    id: "causality_ba",
+    name: "Causality in Business Analytics",
+    unit: 2,
+    order: 7,
+    prerequisites: ["ba_frameworks"],
+    subtopics: ["Causal graphs", "Confounders", "Counterfactuals"],
+    description: "Distinguishing true causal impact from correlation in business decisions.",
+  },
+  {
+    id: "experimental_design",
+    name: "Experimental Design & RCTs",
+    unit: 2,
+    order: 8,
+    prerequisites: ["causality_ba"],
+    subtopics: ["Randomization", "Sample size", "Control/treatment"],
+    description: "Designing valid experiments for product and growth decisions.",
+  },
+  {
+    id: "ab_testing",
+    name: "A/B Testing & Hypothesis Testing",
+    unit: 2,
+    order: 9,
+    prerequisites: ["experimental_design"],
+    subtopics: ["p-values", "Power", "Significance vs impact"],
+    description: "Operationalizing business hypotheses through robust experimentation.",
+  },
+  {
+    id: "pricing_analytics",
+    name: "Pricing Analytics & Revenue Mgmt",
+    unit: 2,
+    order: 10,
+    prerequisites: ["customer_seg_clv"],
+    subtopics: ["Price ladders", "Yield management", "Revenue optimization"],
+    description: "Using analytics to set prices that optimize growth and profitability.",
+  },
+  {
+    id: "price_elasticity",
+    name: "Price Elasticity & Demand Sensitivity",
+    unit: 2,
+    order: 11,
+    prerequisites: ["pricing_analytics"],
+    subtopics: ["Elasticity", "Demand curves", "Sensitivity bands"],
+    description: "Estimating demand response to pricing changes across segments.",
+  },
+  {
+    id: "promo_optimization",
+    name: "Promotion & Offer Optimization",
+    unit: 2,
+    order: 12,
+    prerequisites: ["price_elasticity", "ab_testing"],
+    subtopics: ["Offer design", "Lift modeling", "ROI control"],
+    description: "Optimizing promotional strategy without destroying long-term margin.",
+  },
+  {
+    id: "time_series_ba",
+    name: "Time Series Data & Business Applications",
+    unit: 3,
+    order: 13,
+    prerequisites: ["data_extraction"],
+    subtopics: ["Temporal granularity", "Lag effects", "Business cycles"],
+    description: "Applying time-indexed analytics to business performance trends.",
+  },
+  {
+    id: "trend_seasonality",
+    name: "Trend, Seasonality & Cycles",
+    unit: 3,
+    order: 14,
+    prerequisites: ["time_series_ba"],
+    subtopics: ["Decomposition", "Seasonality", "Cycle interpretation"],
+    description: "Separating long-term trend from periodic patterns in business data.",
+  },
+  {
+    id: "forecasting_methods",
+    name: "Forecasting Methods (MA, ES, ARIMA)",
+    unit: 3,
+    order: 15,
+    prerequisites: ["trend_seasonality"],
+    subtopics: ["Moving average", "Exponential smoothing", "ARIMA"],
+    description: "Selecting and evaluating forecasting methods for planning decisions.",
+  },
+  {
+    id: "churn_analytics",
+    name: "Customer Retention & Churn Analytics",
+    unit: 3,
+    order: 16,
+    prerequisites: ["customer_seg_clv"],
+    subtopics: ["Churn diagnostics", "Retention interventions", "Risk scoring"],
+    description: "Predicting churn risk and designing effective retention actions.",
+  },
+  {
+    id: "inventory_control",
+    name: "Inventory Control & Demand Planning",
+    unit: 3,
+    order: 17,
+    prerequisites: ["forecasting_methods"],
+    subtopics: ["EOQ", "Safety stock", "Reorder points"],
+    description: "Balancing stock availability with carrying costs through demand planning.",
+  },
+  {
+    id: "supply_chain_kpis",
+    name: "Supply Chain Analytics & KPIs",
+    unit: 3,
+    order: 18,
+    prerequisites: ["inventory_control"],
+    subtopics: ["OTIF", "Lead-time variability", "Fill-rate dashboards"],
+    description: "Tracking supply chain performance with operational KPI systems.",
+  },
+  {
+    id: "text_sentiment",
+    name: "Text & Sentiment Analysis",
+    unit: 4,
+    order: 19,
+    prerequisites: ["data_extraction"],
+    subtopics: ["Sentiment scoring", "Theme extraction", "Feedback mining"],
+    description: "Extracting business signal from unstructured customer text.",
+  },
+  {
+    id: "multivariate_testing",
+    name: "Advanced Experimentation & Multivariate Testing",
+    unit: 4,
+    order: 20,
+    prerequisites: ["ab_testing"],
+    subtopics: ["Factor effects", "Interaction terms", "Multi-factor tests"],
+    description: "Scaling beyond A/B into multi-variable experimentation.",
+  },
+  {
+    id: "ethics_bias",
+    name: "Ethics, Bias & Responsible Analytics",
+    unit: 4,
+    order: 21,
+    prerequisites: ["ba_frameworks"],
+    subtopics: ["Bias audits", "Fairness checks", "Responsible deployment"],
+    description: "Ensuring analytics systems are fair, transparent, and accountable.",
+  },
+  {
+    id: "data_privacy",
+    name: "Data Privacy & Governance",
+    unit: 4,
+    order: 22,
+    prerequisites: ["ethics_bias"],
+    subtopics: ["Consent", "Retention policy", "Regulatory obligations"],
+    description: "Governing business data usage under privacy and compliance constraints.",
+  },
+  {
+    id: "ba_capstone",
+    name: "Capstone Project",
+    unit: 4,
+    order: 23,
+    prerequisites: ["forecasting_methods", "promo_optimization", "supply_chain_kpis"],
+    subtopics: ["Problem framing", "Integrated solution", "Decision narrative"],
+    description: "End-to-end business analytics application combining all course capabilities.",
+  },
+];
+
+function normalizeTopicName(value: string): string {
+  return value.toLowerCase().replace(/[^a-z0-9]+/g, "").trim();
+}
+
+function mulberry32(seed: number) {
+  let t = seed;
+  return () => {
+    t += 0x6d2b79f5;
+    let r = Math.imul(t ^ (t >>> 15), 1 | t);
+    r ^= r + Math.imul(r ^ (r >>> 7), 61 | r);
+    return ((r ^ (r >>> 14)) >>> 0) / 4294967296;
   };
 }
 
-// ── Static topic data (prerequisites graph) ──────────────────────────────────
+function buildDeterministicPosition(topic: TopicDef) {
+  const center = UNIT_META[topic.unit].center;
+  const rand = mulberry32(topic.order * 9973 + topic.unit * 101);
+  const radius = 8 + rand() * 32;
+  const theta = rand() * Math.PI * 2;
+  const phi = Math.acos(2 * rand() - 1);
 
-const BA_TOPICS: BATopic[] = [
-  { id: 1,  name: "BA Frameworks & Decision-Making",      unit: 1, x: -6, y: 3, z: 0 },
-  { id: 2,  name: "Customer Data & Analytics Lifecycle",  unit: 1, x: -2, y: 3, z: 0 },
-  { id: 3,  name: "Data Extraction & Analytics",          unit: 1, x: 2, y: 3, z: 0 },
-  { id: 4,  name: "Data Visualization & Dashboards",      unit: 1, x: 6, y: 3, z: 0 },
-  { id: 5,  name: "RFM Analysis",                         unit: 2, x: -4, y: 1, z: 0 },
-  { id: 6,  name: "Customer Segmentation & CLV",          unit: 2, x: -6, y: -1, z: 0 },
-  { id: 7,  name: "Causality in Business Analytics",      unit: 2, x: -1, y: 1, z: 0 },
-  { id: 8,  name: "Experimental Design & RCTs",           unit: 2, x: 1, y: -1, z: 0 },
-  { id: 9,  name: "A/B Testing & Hypothesis Testing",     unit: 2, x: 3, y: 1, z: 0 },
-  { id: 10, name: "Pricing Analytics & Revenue Mgmt",     unit: 2, x: 0, y: -3, z: 0 },
-  { id: 11, name: "Price Elasticity & Demand Sensitivity", unit: 2, x: -2, y: -5, z: 0 },
-  { id: 12, name: "Promotion & Offer Optimization",       unit: 2, x: 2, y: -5, z: 0 },
-  { id: 13, name: "Time Series Data & Business Apps",     unit: 3, x: 6, y: 1, z: 0 },
-  { id: 14, name: "Trend, Seasonality & Cycles",          unit: 3, x: 8, y: -1, z: 0 },
-  { id: 15, name: "Forecasting Methods (MA, ES, ARIMA)",  unit: 3, x: 8, y: -3, z: 0 },
-  { id: 16, name: "Customer Retention & Churn Analytics", unit: 3, x: -4, y: -7, z: 0 },
-  { id: 17, name: "Inventory Control & Demand Planning",  unit: 3, x: 6, y: -5, z: 0 },
-  { id: 18, name: "Supply Chain Analytics & KPIs",        unit: 3, x: 6, y: -7, z: 0 },
-  { id: 19, name: "Text & Sentiment Analysis",            unit: 4, x: -6, y: -9, z: 0 },
-  { id: 20, name: "Advanced Experimentation & MVT",       unit: 4, x: -2, y: -9, z: 0 },
-  { id: 21, name: "Ethics, Bias & Responsible Analytics", unit: 4, x: 2, y: -9, z: 0 },
-  { id: 22, name: "Data Privacy & Governance",            unit: 4, x: 6, y: -9, z: 0 },
-  { id: 23, name: "Capstone Project",                     unit: 4, x: 0, y: -11, z: 0 },
-];
-
-const BA_EDGES: [number, number][] = [
-  [2, 5], [3, 5], [5, 6], [1, 7], [7, 8], [8, 9], [9, 10], [6, 10],
-  [10, 11], [11, 12], [9, 12],
-  [3, 13], [13, 14], [14, 15], [6, 16], [9, 16], [15, 17], [17, 18], [4, 18],
-  [3, 19], [9, 20], [1, 21], [21, 22],
-  [6, 23], [12, 23], [15, 23], [16, 23], [18, 23], [19, 23], [20, 23], [22, 23],
-];
-
-  const BA_TOPIC_DETAILS: Record<number, { description: string; subtopics: string[] }> = {
-    1:  { description: "Frameworks for structuring analytics problems and driving decisions with data.",
-      subtopics: ["CRISP-DM", "Decision trees", "KPI design", "Problem framing"] },
-    2:  { description: "How customer data is collected, stored, and used across the analytics lifecycle.",
-      subtopics: ["Data sources", "ETL basics", "Customer journey", "Data quality"] },
-    3:  { description: "Techniques for querying, cleaning, and preparing data for analysis.",
-      subtopics: ["SQL queries", "Data wrangling", "Missing values", "Aggregations"] },
-    4:  { description: "Principles of visual communication and building effective dashboards.",
-      subtopics: ["Chart selection", "Tableau/Power BI", "Storytelling", "KPI dashboards"] },
-    5:  { description: "Scoring customers on Recency, Frequency, and Monetary value to prioritize outreach.",
-      subtopics: ["RFM scoring", "Quintile segmentation", "Score weighting", "Campaign targeting"] },
-    6:  { description: "Grouping customers by behavior and calculating long-term revenue value.",
-      subtopics: ["K-means clustering", "CLV formula", "Cohort analysis", "Persona mapping"] },
-    7:  { description: "Understanding cause-effect relationships vs correlation in business data.",
-      subtopics: ["Confounding variables", "Causal graphs", "Observational studies", "Counterfactuals"] },
-    8:  { description: "Designing controlled experiments to test business hypotheses reliably.",
-      subtopics: ["Control vs treatment", "Sample size", "Randomization", "Experiment validity"] },
-    9:  { description: "Statistical testing to determine if observed differences are significant.",
-      subtopics: ["Null hypothesis", "p-value", "Z-test", "Type I/II errors", "Power analysis"] },
-    10: { description: "Setting prices strategically to maximize revenue across customer segments.",
-      subtopics: ["Price optimization", "Revenue curves", "Willingness to pay", "Yield management"] },
-    11: { description: "Measuring how sensitive demand is to price changes.",
-      subtopics: ["PED formula", "Elastic vs inelastic", "Cross-price elasticity", "Demand curves"] },
-    12: { description: "Designing offers and discounts that maximize conversion without eroding margins.",
-      subtopics: ["Discount optimization", "Bundle pricing", "Promo ROI", "Uplift modeling"] },
-    13: { description: "Understanding data indexed by time and its unique analytical properties.",
-      subtopics: ["Time index", "Stationarity", "Autocorrelation", "Business cycles"] },
-    14: { description: "Decomposing time series into trend, seasonal, and residual components.",
-      subtopics: ["STL decomposition", "Additive vs multiplicative", "Seasonal indices", "Cycle detection"] },
-    15: { description: "Applying moving average, exponential smoothing, and ARIMA to forecast business metrics.",
-      subtopics: ["MA(n)", "Holt-Winters", "ARIMA(p,d,q)", "Forecast error metrics"] },
-    16: { description: "Predicting which customers will leave and designing retention interventions.",
-      subtopics: ["Churn rate", "Survival analysis", "Logistic regression", "Retention campaigns"] },
-    17: { description: "Optimizing stock levels to balance holding costs and stockout risk.",
-      subtopics: ["EOQ model", "Safety stock", "Reorder point", "ABC analysis"] },
-    18: { description: "Measuring and optimizing the flow of goods from supplier to customer.",
-      subtopics: ["Supply chain KPIs", "Lead time", "Bullwhip effect", "Vendor analytics"] },
-    19: { description: "Extracting sentiment and topics from customer reviews, social media, and support tickets.",
-      subtopics: ["Sentiment scoring", "TF-IDF", "Topic modeling", "NPS text analysis"] },
-    20: { description: "Running multiple simultaneous experiments across variables and interactions.",
-      subtopics: ["Factorial design", "Interaction effects", "ANOVA", "Multi-armed bandit"] },
-    21: { description: "Recognizing and mitigating bias in data collection, models, and decision-making.",
-      subtopics: ["Selection bias", "Algorithmic fairness", "Proxy variables", "Audit frameworks"] },
-    22: { description: "Legal and ethical frameworks governing how customer data is collected and used.",
-      subtopics: ["GDPR basics", "Data minimization", "Consent management", "Anonymization"] },
-    23: { description: "End-to-end business analytics project integrating all course concepts.",
-      subtopics: ["Problem scoping", "Data pipeline", "Model + insights", "Stakeholder presentation"] },
+  return {
+    x: center.x + radius * Math.sin(phi) * Math.cos(theta),
+    y: center.y + radius * Math.cos(phi),
+    z: center.z + radius * Math.sin(phi) * Math.sin(theta),
   };
+}
 
-const TOPIC_GRAPH: Record<string, { name: string; prerequisites: string[]; subtopics: string[]; description: string; unit: 1 | 2 | 3 | 4 }> =
-  BA_TOPICS.reduce((acc, topic) => {
-    const prerequisites = BA_EDGES
-      .filter(([from, to]) => to === topic.id)
-      .map(([from]) => String(from));
+function shadeHex(hex: string, factor: number) {
+  const h = hex.replace("#", "");
+  const r = Math.max(0, Math.min(255, Math.round(parseInt(h.slice(0, 2), 16) * factor)));
+  const g = Math.max(0, Math.min(255, Math.round(parseInt(h.slice(2, 4), 16) * factor)));
+  const b = Math.max(0, Math.min(255, Math.round(parseInt(h.slice(4, 6), 16) * factor)));
+  return `#${r.toString(16).padStart(2, "0")}${g.toString(16).padStart(2, "0")}${b.toString(16).padStart(2, "0")}`;
+}
 
-    acc[String(topic.id)] = {
-      name: topic.name,
-      prerequisites,
-      subtopics: BA_TOPIC_DETAILS[topic.id]?.subtopics ?? [],
-      description: BA_TOPIC_DETAILS[topic.id]?.description ?? "",
-      unit: topic.unit,
+function relativeTime(value: string | null) {
+  if (!value) return "Never";
+  const dt = new Date(value);
+  if (Number.isNaN(dt.getTime())) return "Unknown";
+  const diff = Date.now() - dt.getTime();
+  const min = Math.floor(diff / 60000);
+  if (min < 1) return "Just now";
+  if (min < 60) return `${min}m ago`;
+  const hr = Math.floor(min / 60);
+  if (hr < 24) return `${hr}h ago`;
+  const day = Math.floor(hr / 24);
+  if (day < 30) return `${day}d ago`;
+  return dt.toLocaleDateString();
+}
+
+function getStateLabel(state: MasteryState) {
+  if (state === "locked") return "Locked";
+  if (state === "unassessed") return "Unassessed";
+  if (state === "explored") return "Exploring";
+  if (state === "intermediate") return "Intermediate";
+  return "Advanced";
+}
+
+function getTopicLabel(topicId: string) {
+  return SHORT_LABELS[topicId] ?? topicId;
+}
+
+function materialIconStyle(size: number, color = "#8b8b9e") {
+  return {
+    fontFamily: "Material Symbols Outlined",
+    fontSize: `${size}px`,
+    fontStyle: "normal" as const,
+    fontWeight: "normal" as const,
+    lineHeight: 1,
+    letterSpacing: "normal",
+    textTransform: "none" as const,
+    display: "inline-block" as const,
+    whiteSpace: "nowrap" as const,
+    WebkitFontFeatureSettings: '"liga"',
+    WebkitFontSmoothing: "antialiased" as const,
+    color,
+  };
+}
+
+function getStateVisual(topic: TopicMerged) {
+  const unitColor = UNIT_META[topic.unit].color;
+
+  if (topic.state === "locked") {
+    return {
+      radius: 4,
+      color: "#1a1a24",
+      opacity: 0.25,
+      glow: 0,
+      wireframe: false,
+      labelColor: "#2a2a3a",
+      pulse: false,
+      particles: false,
+      crown: false,
+      clickable: false,
     };
+  }
 
-    return acc;
-  }, {} as Record<string, { name: string; prerequisites: string[]; subtopics: string[]; description: string; unit: 1 | 2 | 3 | 4 }>);
+  if (topic.state === "unassessed") {
+    return {
+      radius: 4,
+      color: "#2a2a3a",
+      opacity: 0.4,
+      glow: 0,
+      wireframe: true,
+      labelColor: "#4a4a5e",
+      pulse: false,
+      particles: false,
+      crown: false,
+      clickable: true,
+    };
+  }
 
-// ── Color helpers ─────────────────────────────────────────────────────────────
+  if (topic.state === "explored") {
+    return {
+      radius: 5,
+      color: shadeHex(unitColor, 0.4),
+      opacity: 0.6,
+      glow: 0.3,
+      wireframe: false,
+      labelColor: "#8b8b9e",
+      pulse: false,
+      particles: false,
+      crown: false,
+      clickable: true,
+    };
+  }
 
-function getUnitColor(unit: number): { base: string; glow: string } {
-  if (unit === 1) return { base: "#6e28f5", glow: "#6e28f5" };
-  if (unit === 2) return { base: "#2563eb", glow: "#2563eb" };
-  if (unit === 3) return { base: "#059669", glow: "#059669" };
-  return { base: "#dc2626", glow: "#dc2626" };
+  if (topic.state === "intermediate") {
+    return {
+      radius: 6.5,
+      color: shadeHex(unitColor, 0.7),
+      opacity: 0.85,
+      glow: 0.6,
+      wireframe: false,
+      labelColor: "#f0f0f5",
+      pulse: true,
+      particles: false,
+      crown: false,
+      clickable: true,
+    };
+  }
+
+  return {
+    radius: 8,
+    color: unitColor,
+    opacity: 1,
+    glow: 1,
+    wireframe: false,
+    labelColor: "#ffffff",
+    pulse: false,
+    particles: true,
+    crown: true,
+    clickable: true,
+  };
 }
 
-// ── Knowledge Graph Page ──────────────────────────────────────────────────────
+function classifyState(topic: TopicDef, pKnown: number, sessionCount: number, allById: Record<string, TopicMerged | null>) {
+  const hasPrereqs = topic.prerequisites.length > 0;
+  const locked = hasPrereqs && topic.prerequisites.every((pid) => (allById[pid]?.p_known ?? 0) < 0.3);
+  if (locked) return "locked" as MasteryState;
+  if (pKnown <= 0 && sessionCount <= 0) return "unassessed" as MasteryState;
+  if (sessionCount > 0 && pKnown < 0.4) return "explored" as MasteryState;
+  if (pKnown >= 0.7) return "advanced" as MasteryState;
+  return "intermediate" as MasteryState;
+}
 
-export default function KnowledgeGraphPage() {
+async function ensureThreeR128() {
+  if (window.THREE) return window.THREE;
+
+  await new Promise<void>((resolve, reject) => {
+    const existing = document.querySelector('script[data-three-r128="1"]') as HTMLScriptElement | null;
+    if (existing && window.THREE) {
+      resolve();
+      return;
+    }
+
+    if (existing) {
+      existing.addEventListener("load", () => resolve(), { once: true });
+      existing.addEventListener("error", () => reject(new Error("Failed to load Three.js")), { once: true });
+      return;
+    }
+
+    const script = document.createElement("script");
+    script.src = "https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js";
+    script.async = true;
+    script.dataset.threeR128 = "1";
+    script.onload = () => resolve();
+    script.onerror = () => reject(new Error("Failed to load Three.js r128"));
+    document.head.appendChild(script);
+  });
+
+  return window.THREE;
+}
+
+function buildLockTexture(THREE: any) {
+  const canvas = document.createElement("canvas");
+  canvas.width = 96;
+  canvas.height = 96;
+  const ctx = canvas.getContext("2d");
+  if (!ctx) return new THREE.CanvasTexture(canvas);
+
+  ctx.clearRect(0, 0, 96, 96);
+  ctx.strokeStyle = "#8b8b9e";
+  ctx.lineWidth = 6;
+  ctx.beginPath();
+  ctx.arc(48, 34, 16, Math.PI, 0);
+  ctx.stroke();
+
+  ctx.fillStyle = "#1a1a24";
+  ctx.strokeStyle = "#8b8b9e";
+  ctx.lineWidth = 4;
+  ctx.fillRect(28, 42, 40, 32);
+  ctx.strokeRect(28, 42, 40, 32);
+
+  const tex = new THREE.CanvasTexture(canvas);
+  tex.needsUpdate = true;
+  return tex;
+}
+
+function buildFallbackTopics() {
+  const fallback: Record<string, TopicMerged> = {};
+  TOPICS.forEach((topic) => {
+    fallback[topic.id] = {
+      ...topic,
+      p_known: 0,
+      mastery_level: "unassessed",
+      session_count: 0,
+      last_studied_at: null,
+      understanding_summary: null,
+      misconceptions_count: 0,
+      forge_attempts_count: 0,
+      state: "unassessed",
+    };
+  });
+
+  Object.values(fallback).forEach((topic) => {
+    fallback[topic.id] = { ...topic, state: classifyState(topic, topic.p_known, topic.session_count, fallback as any) };
+  });
+
+  return fallback;
+}
+
+export default function BAGraphPage() {
   const router = useRouter();
-  const { user, token } = useAuthStore();
+  const { token } = useAuthStore();
+  const API = process.env.NEXT_PUBLIC_API_URL || "https://datalingo.in/api";
+
   const mountRef = useRef<HTMLDivElement>(null);
-  const rendererRef = useRef<THREE.WebGLRenderer | null>(null);
-  const sceneRef = useRef<THREE.Scene | null>(null);
-  const cameraRef = useRef<THREE.PerspectiveCamera | null>(null);
-  const animFrameRef = useRef<number>(0);
-  const nodesRef = useRef<NodeMesh[]>([]);
-  const particlesRef = useRef<THREE.Points[]>([]);
-  const isDraggingRef = useRef(false);
-  const lastMouseRef = useRef({ x: 0, y: 0 });
+  const labelsRef = useRef<HTMLDivElement>(null);
+
+  const rendererRef = useRef<any>(null);
+  const sceneRef = useRef<any>(null);
+  const cameraRef = useRef<any>(null);
+  const raycasterRef = useRef<any>(null);
+  const pointerRef = useRef<{ x: number; y: number }>({ x: 0, y: 0 });
+
+  const frameRef = useRef<number>(0);
+  const nodeMeshMapRef = useRef<Record<string, any>>({});
+  const nodeMetaRef = useRef<Record<string, { position: { x: number; y: number; z: number }; visual: ReturnType<typeof getStateVisual> }>>({});
+  const ringMapRef = useRef<Record<string, any>>({});
+  const labelMapRef = useRef<Record<string, HTMLDivElement>>({});
+
+  const edgeItemsRef = useRef<Array<{ sourceId: string; targetId: string; state: "locked" | "available" | "mastered"; line: any; dash?: any; particles?: any[]; from: any; to: any }>>([]);
+  const advancedOrbitsRef = useRef<Array<{ topicId: string; orbitGroup: any; angleOffset: number }>>([]);
+  const hoveredTopicIdRef = useRef<string | null>(null);
+  const selectedTopicIdRef = useRef<string | null>(null);
+  const unitFilterRef = useRef<UnitFilter>("all");
+  const topicsRef = useRef<Record<string, TopicMerged>>({});
+
+  const dragRef = useRef({ active: false, lastX: 0, lastY: 0, touchDist: 0 });
+  const sphericalRef = useRef({ theta: 0, phi: 1.279, radius: 208.8 });
   const autoRotateRef = useRef(true);
-  const cameraAngleRef = useRef({ theta: 0, phi: Math.PI / 3 });
-  const cameraRadiusRef = useRef(38);
+  const hasInteractedRef = useRef(false);
 
-  const [topics, setTopics] = useState<Record<string, TopicNode>>({});
-  const [selectedTopic, setSelectedTopic] = useState<TopicNode | null>(null);
-  const [panelOpen, setPanelOpen] = useState(false);
-  const [mounted, setMounted] = useState(false);
   const [loading, setLoading] = useState(true);
-  const [loadError, setLoadError] = useState<string | null>(null);
-  const [sidebarWidth, setSidebarWidth] = useState(252);
+  const [mounted, setMounted] = useState(false);
+  const [topics, setTopics] = useState<Record<string, TopicMerged>>({});
+  const [selectedTopicId, setSelectedTopicId] = useState<string | null>(null);
+  const [hoveredTopicId, setHoveredTopicId] = useState<string | null>(null);
+  const [tooltip, setTooltip] = useState<TooltipState | null>(null);
+  const [legendOpen, setLegendOpen] = useState(true);
+  const [unitFilter, setUnitFilter] = useState<UnitFilter>("all");
+  const [isMobile, setIsMobile] = useState(false);
+  const [isTablet, setIsTablet] = useState(false);
 
-  const API = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
-
-  useEffect(() => { setMounted(true); }, []);
-
-  // Auth guard
   useEffect(() => {
-    if (mounted && (!token || !user)) router.replace("/login");
-  }, [mounted, token, user]);
+    setMounted(true);
+  }, []);
 
-  // Fetch mastery data
+  const selectedTopic = selectedTopicId ? topics[selectedTopicId] || null : null;
+
   useEffect(() => {
-    if (!token || !user) return;
-    fetch(`${API}/analytics/me`, { headers: { Authorization: `Bearer ${token}` } })
-      .then(async r => {
-        if (!r.ok) {
-          const detail = await r.text();
-          throw new Error(detail || `Failed to load mastery data (${r.status})`);
+    hoveredTopicIdRef.current = hoveredTopicId;
+  }, [hoveredTopicId]);
+
+  useEffect(() => {
+    selectedTopicIdRef.current = selectedTopicId;
+  }, [selectedTopicId]);
+
+  useEffect(() => {
+    unitFilterRef.current = unitFilter;
+  }, [unitFilter]);
+
+  useEffect(() => {
+    if (isMobile) {
+      setTooltip(null);
+      setHoveredTopicId(null);
+      setLegendOpen(false);
+    }
+  }, [isMobile]);
+
+  useEffect(() => {
+    topicsRef.current = topics;
+  }, [topics]);
+
+  const advancedCount = useMemo(() => Object.values(topics).filter((t) => t.state === "advanced").length, [topics]);
+
+  useEffect(() => {
+    const check = () => {
+      setIsMobile(window.innerWidth < 768);
+      setIsTablet(window.innerWidth >= 768 && window.innerWidth < 1024);
+    };
+    check();
+    window.addEventListener("resize", check);
+    return () => window.removeEventListener("resize", check);
+  }, []);
+
+  useEffect(() => {
+    if (!mounted) return;
+    if (token === undefined) return;
+    if (!token) {
+      setTopics(buildFallbackTopics());
+      setLoading(false);
+      return;
+    }
+
+    let alive = true;
+
+    const loadData = async () => {
+      await new Promise((r) => setTimeout(r, 50));
+      if (!alive) return;
+      setLoading(true);
+
+      try {
+        const headers = { Authorization: `Bearer ${token}` };
+
+        const [masteryRes, palaceRes] = await Promise.all([
+          fetch(`${API}/analytics/me`, { headers }),
+          fetch(`${API}/analytics/ba/palace`, { headers }).catch(() => null),
+        ]);
+
+        let masteryPayload: any = {};
+        if (masteryRes.ok) {
+          masteryPayload = await masteryRes.json().catch(() => ({}));
         }
-        return r.json();
-      })
-      .then(data => {
-        setLoadError(null);
-        const masteryMap: Record<string, { p_known: number; assessment_count: number }> = {};
-        (data.mastery_by_topic || []).forEach((m: any) => {
-          masteryMap[m.topic_id] = { p_known: m.p_known, assessment_count: m.assessment_count };
+
+        let palaceRows: PalaceRow[] = [];
+        if (palaceRes && palaceRes.ok) {
+          const payload = await palaceRes.json().catch(() => []);
+          if (Array.isArray(payload)) palaceRows = payload;
+          if (Array.isArray(payload?.rows)) palaceRows = payload.rows;
+        }
+
+        const masteryRows: MasteryRow[] = [
+          ...(Array.isArray(masteryPayload?.concept_mastery) ? masteryPayload.concept_mastery : []),
+          ...(Array.isArray(masteryPayload?.mastery_by_topic) ? masteryPayload.mastery_by_topic : []),
+        ];
+
+        const byIdMastery: Record<string, MasteryRow> = {};
+        const byNameMastery: Record<string, MasteryRow> = {};
+
+        masteryRows.forEach((row) => {
+          if (row.topic_id) byIdMastery[String(row.topic_id)] = row;
+          const n = row.topic_name || row.name;
+          if (n) byNameMastery[normalizeTopicName(n)] = row;
         });
 
-        const built: Record<string, TopicNode> = {};
-        Object.entries(TOPIC_GRAPH).forEach(([id, info]) => {
-          const mastery = masteryMap[id];
-          const p = mastery?.p_known ?? -1;
-          const level = p < 0 ? "unassessed" : p < 0.4 ? "beginner" : p < 0.7 ? "intermediate" : "advanced";
-          built[id] = {
-            id, ...info,
-            p_known: p < 0 ? 0 : p,
-            assessment_count: mastery?.assessment_count ?? 0,
-            level,
+        const byIdPalace: Record<string, PalaceRow> = {};
+        const byNamePalace: Record<string, PalaceRow> = {};
+
+        palaceRows.forEach((row) => {
+          if (row.topic_id) byIdPalace[String(row.topic_id)] = row;
+          const n = row.topic_name || row.name;
+          if (n) byNamePalace[normalizeTopicName(n)] = row;
+        });
+
+        const placeholder: Record<string, TopicMerged | null> = {};
+        TOPICS.forEach((topic) => {
+          placeholder[topic.id] = null;
+        });
+
+        const merged: Record<string, TopicMerged> = {};
+        TOPICS.forEach((topic) => {
+          const nameKey = normalizeTopicName(topic.name);
+          const masteryRow = byIdMastery[topic.id] || byNameMastery[nameKey];
+          const palaceRow = byIdPalace[topic.id] || byNamePalace[nameKey];
+
+          const pKnown = Number(
+            palaceRow?.p_known ?? masteryRow?.p_known ?? 0,
+          );
+          const sessionCount = Number(palaceRow?.session_count ?? masteryRow?.assessment_count ?? 0);
+
+          const misconceptionsRaw = palaceRow?.misconceptions;
+          const forgeRaw = palaceRow?.forge_attempts;
+
+          const misconceptionsCount = Array.isArray(misconceptionsRaw)
+            ? misconceptionsRaw.length
+            : typeof misconceptionsRaw === "number"
+              ? misconceptionsRaw
+              : 0;
+
+          const forgeAttemptsCount = Array.isArray(forgeRaw)
+            ? forgeRaw.length
+            : typeof forgeRaw === "number"
+              ? forgeRaw
+              : 0;
+
+          merged[topic.id] = {
+            ...topic,
+            p_known: Number.isFinite(pKnown) ? Math.max(0, Math.min(1, pKnown)) : 0,
+            mastery_level: String(palaceRow?.mastery_level || masteryRow?.mastery_level || "unassessed"),
+            session_count: Number.isFinite(sessionCount) ? Math.max(0, sessionCount) : 0,
+            last_studied_at: palaceRow?.last_studied_at || null,
+            understanding_summary: palaceRow?.understanding_summary || null,
+            misconceptions_count: misconceptionsCount,
+            forge_attempts_count: forgeAttemptsCount,
+            state: "unassessed",
           };
         });
-        setTopics(built);
-        setLoading(false);
-      })
-      .catch((err) => {
-        console.error("[KnowledgeGraph] mastery fetch error:", err);
-        setLoadError("Could not load your mastery data. Showing graph without scores.");
-        // Fallback: build with no mastery
-        const built: Record<string, TopicNode> = {};
-        Object.entries(TOPIC_GRAPH).forEach(([id, info]) => {
-          built[id] = { id, ...info, p_known: 0, assessment_count: 0, level: "unassessed" };
+
+        const withState: Record<string, TopicMerged> = {};
+        Object.values(merged).forEach((topic) => {
+          withState[topic.id] = {
+            ...topic,
+            state: classifyState(topic, topic.p_known, topic.session_count, placeholder as any),
+          };
         });
-        setTopics(built);
-        setLoading(false);
-      });
-  }, [token, user]);
 
-  // Build Three.js scene
-  useEffect(() => {
-    if (!mountRef.current || loading || Object.keys(topics).length === 0) return;
-
-    const W = mountRef.current.clientWidth;
-    const H = mountRef.current.clientHeight;
-
-    // Renderer
-    const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
-    renderer.setSize(W, H);
-    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
-    renderer.setClearColor(0x000000, 0);
-    mountRef.current.appendChild(renderer.domElement);
-    rendererRef.current = renderer;
-
-    // Scene
-    const scene = new THREE.Scene();
-    sceneRef.current = scene;
-
-    // Camera
-    const camera = new THREE.PerspectiveCamera(60, W / H, 0.1, 500);
-    camera.position.set(0, 12, 38);
-    camera.lookAt(0, 0, 0);
-    cameraRef.current = camera;
-
-    // Ambient + point lights
-    scene.add(new THREE.AmbientLight(0x1a0a3e, 2));
-    const pLight = new THREE.PointLight(0x6e28f5, 3, 60);
-    pLight.position.set(0, 20, 0);
-    scene.add(pLight);
-    const pLight2 = new THREE.PointLight(0x3b82f6, 2, 40);
-    pLight2.position.set(-15, -10, 10);
-    scene.add(pLight2);
-
-    // Starfield background
-    const starGeo = new THREE.BufferGeometry();
-    const starVerts = [];
-    for (let i = 0; i < 2000; i++) {
-      starVerts.push((Math.random() - 0.5) * 300, (Math.random() - 0.5) * 300, (Math.random() - 0.5) * 300);
-    }
-    starGeo.setAttribute("position", new THREE.Float32BufferAttribute(starVerts, 3));
-    const starMat = new THREE.PointsMaterial({ color: 0xffffff, size: 0.15, transparent: true, opacity: 0.5 });
-    scene.add(new THREE.Points(starGeo, starMat));
-
-    // Layout nodes in 3D space using force-like positions
-    const topicIds = Object.keys(topics);
-    const positions: Record<string, THREE.Vector3> = {};
-
-    // Layered layout — dependency depth determines Y level
-    const depth: Record<string, number> = {};
-    const getDepth = (id: string): number => {
-      if (depth[id] !== undefined) return depth[id];
-      const prereqs = TOPIC_GRAPH[id]?.prerequisites || [];
-      if (prereqs.length === 0) { depth[id] = 0; return 0; }
-      depth[id] = Math.max(...prereqs.map(p => getDepth(p))) + 1;
-      return depth[id];
-    };
-    topicIds.forEach(id => getDepth(id));
-
-    const maxDepth = Math.max(...Object.values(depth));
-    const byDepth: Record<number, string[]> = {};
-    topicIds.forEach(id => {
-      const d = depth[id];
-      if (!byDepth[d]) byDepth[d] = [];
-      byDepth[d].push(id);
-    });
-
-    // Position nodes in spiral layers
-    topicIds.forEach(id => {
-      const d = depth[id];
-      const siblings = byDepth[d];
-      const idx = siblings.indexOf(id);
-      const angle = (idx / siblings.length) * Math.PI * 2 + d * 0.4;
-      const radius = 6 + d * 4.5 + Math.random() * 2;
-      const y = (d - maxDepth / 2) * 5 + (Math.random() - 0.5) * 3;
-      positions[id] = new THREE.Vector3(
-        Math.cos(angle) * radius,
-        y,
-        Math.sin(angle) * radius
-      );
-    });
-
-    // Create node meshes
-    const nodes: NodeMesh[] = [];
-    topicIds.forEach(id => {
-      const topic = topics[id];
-      const colors = getUnitColor(topic.unit);
-      const baseColor = new THREE.Color(colors.base);
-      const glowColor = new THREE.Color(colors.glow);
-
-      let nodeScale = 1.0;
-      let emissiveIntensity = 0.4;
-      let opacity = 0.5;
-
-      if (topic.level === "beginner") {
-        opacity = 0.75;
-        nodeScale = 1.0;
-        emissiveIntensity = 0.5;
-      }
-      if (topic.level === "intermediate") {
-        opacity = 0.88;
-        nodeScale = 1.15;
-        emissiveIntensity = 0.7;
-      }
-      if (topic.level === "advanced") {
-        opacity = 1.0;
-        nodeScale = 1.3;
-        emissiveIntensity = 1.0;
-      }
-
-      const geo = new THREE.SphereGeometry(0.7, 32, 32);
-      const mat = new THREE.MeshPhongMaterial({
-        color: baseColor,
-        emissive: glowColor,
-        emissiveIntensity,
-        shininess: 100,
-        transparent: true,
-        opacity,
-      });
-      const mesh = new THREE.Mesh(geo, mat) as unknown as NodeMesh;
-      mesh.position.copy(positions[id]);
-      mesh.scale.setScalar(nodeScale);
-      mesh.userData = {
-        id,
-        baseColor,
-        glowColor,
-        baseEmissiveIntensity: emissiveIntensity,
-        velocity: new THREE.Vector3(
-          (Math.random() - 0.5) * 0.01,
-          (Math.random() - 0.5) * 0.005,
-          (Math.random() - 0.5) * 0.01
-        ),
-        targetPos: positions[id].clone(),
-      };
-      scene.add(mesh);
-      nodes.push(mesh);
-
-      // Glow halo
-      const haloGeo = new THREE.SphereGeometry(1.1, 16, 16);
-      const haloMat = new THREE.MeshBasicMaterial({
-        color: glowColor, transparent: true, opacity: 0.08, side: THREE.BackSide,
-      });
-      const halo = new THREE.Mesh(haloGeo, haloMat);
-      mesh.add(halo);
-
-      if (topic.level === "unassessed") {
-        const ringGeo = new THREE.RingGeometry(1.0, 1.1, 32);
-        const ringEdges = new THREE.EdgesGeometry(ringGeo);
-        const ringMat = new THREE.LineDashedMaterial({
-          color: 0xffffff,
-          transparent: true,
-          opacity: 0.15,
-          dashSize: 0.08,
-          gapSize: 0.05,
+        Object.values(withState).forEach((topic) => {
+          withState[topic.id] = {
+            ...topic,
+            state: classifyState(topic, topic.p_known, topic.session_count, withState as any),
+          };
         });
-        const ring = new THREE.LineSegments(ringEdges, ringMat);
-        ring.rotation.x = Math.PI / 2;
-        ring.computeLineDistances();
-        mesh.add(ring);
-      }
 
-      // Label sprite
-      const canvas = document.createElement("canvas");
-      canvas.width = 256; canvas.height = 64;
-      const ctx = canvas.getContext("2d")!;
-      ctx.fillStyle = "rgba(0,0,0,0)";
-      ctx.fillRect(0, 0, 256, 64);
-      ctx.font = "bold 22px Manrope, sans-serif";
-      ctx.fillStyle = colors.glow;
-      ctx.textAlign = "center";
-      ctx.fillText(topic.name, 128, 40);
-      const tex = new THREE.CanvasTexture(canvas);
-      const spriteMat = new THREE.SpriteMaterial({ map: tex, transparent: true, opacity: 0.9 });
-      const sprite = new THREE.Sprite(spriteMat);
-      sprite.position.y = 1.4;
-      sprite.scale.set(4, 1, 1);
-      mesh.add(sprite);
-    });
-    nodesRef.current = nodes;
-
-    // Draw edges with particle flow
-    const edgeParticles: THREE.Points[] = [];
-    topicIds.forEach(id => {
-      TOPIC_GRAPH[id].prerequisites.forEach(prereqId => {
-        if (!positions[prereqId] || !positions[id]) return;
-
-        const from = positions[prereqId];
-        const to = positions[id];
-
-        // Static edge line
-        const edgeGeo = new THREE.BufferGeometry().setFromPoints([from, to]);
-        const edgeMat = new THREE.LineBasicMaterial({
-          color: 0x6e28f5, transparent: true, opacity: 0.15,
-        });
-        scene.add(new THREE.Line(edgeGeo, edgeMat));
-
-        // Particle flow along edge
-        const particleCount = 12;
-        const pGeo = new THREE.BufferGeometry();
-        const pPositions = new Float32Array(particleCount * 3);
-        const pProgress = new Float32Array(particleCount);
-        for (let i = 0; i < particleCount; i++) {
-          pProgress[i] = i / particleCount;
-          const t = pProgress[i];
-          pPositions[i * 3]     = from.x + (to.x - from.x) * t;
-          pPositions[i * 3 + 1] = from.y + (to.y - from.y) * t;
-          pPositions[i * 3 + 2] = from.z + (to.z - from.z) * t;
-        }
-        pGeo.setAttribute("position", new THREE.BufferAttribute(pPositions, 3));
-        pGeo.userData = { from, to, progress: pProgress, particleCount };
-
-        const pMat = new THREE.PointsMaterial({
-          color: 0x9b5de5, size: 0.18, transparent: true, opacity: 0.7,
-        });
-        const particles = new THREE.Points(pGeo, pMat);
-        scene.add(particles);
-        edgeParticles.push(particles);
-      });
-    });
-    particlesRef.current = edgeParticles;
-
-    // Raycaster for clicks
-    const raycaster = new THREE.Raycaster();
-    const mouse = new THREE.Vector2();
-
-    const onMouseClick = (e: MouseEvent) => {
-      if (!mountRef.current || isDraggingRef.current) return;
-      const rect = mountRef.current.getBoundingClientRect();
-      mouse.x = ((e.clientX - rect.left) / rect.width) * 2 - 1;
-      mouse.y = -((e.clientY - rect.top) / rect.height) * 2 + 1;
-      raycaster.setFromCamera(mouse, camera);
-      const hits = raycaster.intersectObjects(nodes);
-      if (hits.length > 0) {
-        const mesh = hits[0].object as NodeMesh;
-        const id = mesh.userData.id;
-        setSelectedTopic(topics[id] || null);
-        setPanelOpen(true);
-        autoRotateRef.current = false;
-      } else {
-        setPanelOpen(false);
+        if (!alive) return;
+        setTopics(withState);
+      } catch {
+        if (!alive) return;
+        setTopics(buildFallbackTopics());
+      } finally {
+        if (alive) setLoading(false);
       }
     };
 
-    // Mouse drag for orbit
-    const onMouseDown = (e: MouseEvent) => {
-      isDraggingRef.current = false;
-      lastMouseRef.current = { x: e.clientX, y: e.clientY };
-    };
-    const onMouseMove = (e: MouseEvent) => {
-      const dx = e.clientX - lastMouseRef.current.x;
-      const dy = e.clientY - lastMouseRef.current.y;
-      if (e.buttons === 1 && (Math.abs(dx) > 2 || Math.abs(dy) > 2)) {
-        isDraggingRef.current = true;
-        autoRotateRef.current = false;
-        cameraAngleRef.current.theta -= dx * 0.005;
-        cameraAngleRef.current.phi = Math.max(0.3, Math.min(Math.PI - 0.3, cameraAngleRef.current.phi + dy * 0.005));
-        lastMouseRef.current = { x: e.clientX, y: e.clientY };
-      }
-    };
-    const onWheel = (e: WheelEvent) => {
-      cameraRadiusRef.current = Math.max(15, Math.min(70, cameraRadiusRef.current + e.deltaY * 0.05));
-    };
-
-    renderer.domElement.addEventListener("click", onMouseClick);
-    renderer.domElement.addEventListener("mousedown", onMouseDown);
-    renderer.domElement.addEventListener("mousemove", onMouseMove);
-    renderer.domElement.addEventListener("wheel", onWheel);
-
-    // Animation loop
-    const clock = new THREE.Timer();
-    const animate = () => {
-      animFrameRef.current = requestAnimationFrame(animate);
-      clock.update();
-      const t = clock.getElapsed();
-
-      // Auto-rotate
-      if (autoRotateRef.current) {
-        cameraAngleRef.current.theta += 0.002;
-      }
-
-      // Update camera
-      const { theta, phi } = cameraAngleRef.current;
-      const r = cameraRadiusRef.current;
-      camera.position.set(
-        r * Math.sin(phi) * Math.sin(theta),
-        r * Math.cos(phi),
-        r * Math.sin(phi) * Math.cos(theta)
-      );
-      camera.lookAt(0, 0, 0);
-
-      // Animate nodes — subtle float
-      nodes.forEach((node, i) => {
-        node.position.y = node.userData.targetPos.y + Math.sin(t * 0.5 + i * 0.7) * 0.15;
-        node.rotation.y += 0.004;
-        // Pulse emissive
-        const mat = node.material as THREE.MeshPhongMaterial;
-        mat.emissiveIntensity = node.userData.baseEmissiveIntensity + Math.sin(t * 1.2 + i) * 0.12;
-      });
-
-      // Animate particles along edges
-      edgeParticles.forEach(pts => {
-        const { from, to, progress, particleCount } = pts.geometry.userData;
-        const positions = pts.geometry.attributes.position.array as Float32Array;
-        for (let i = 0; i < particleCount; i++) {
-          progress[i] = (progress[i] + 0.004) % 1;
-          const p = progress[i];
-          positions[i * 3]     = from.x + (to.x - from.x) * p;
-          positions[i * 3 + 1] = from.y + (to.y - from.y) * p;
-          positions[i * 3 + 2] = from.z + (to.z - from.z) * p;
-        }
-        pts.geometry.attributes.position.needsUpdate = true;
-        // Fade particles at endpoints
-        const mat = pts.material as THREE.PointsMaterial;
-        mat.opacity = 0.5 + Math.sin(t * 2) * 0.2;
-      });
-
-      renderer.render(scene, camera);
-    };
-    animate();
-
-    // Resize handler
-    const onResize = () => {
-      if (!mountRef.current) return;
-      const W = mountRef.current.clientWidth;
-      const H = mountRef.current.clientHeight;
-      camera.aspect = W / H;
-      camera.updateProjectionMatrix();
-      renderer.setSize(W, H);
-    };
-    window.addEventListener("resize", onResize);
+    loadData();
 
     return () => {
-      cancelAnimationFrame(animFrameRef.current);
-      renderer.domElement.removeEventListener("click", onMouseClick);
-      renderer.domElement.removeEventListener("mousedown", onMouseDown);
-      renderer.domElement.removeEventListener("mousemove", onMouseMove);
-      renderer.domElement.removeEventListener("wheel", onWheel);
-      window.removeEventListener("resize", onResize);
-      renderer.dispose();
-      if (mountRef.current) mountRef.current.removeChild(renderer.domElement);
+      alive = false;
     };
-  }, [topics, loading]);
+  }, [API, token, mounted]);
 
-  // ── Render ─────────────────────────────────────────────────────────────────
+  useEffect(() => {
+    if (loading || Object.keys(topics).length === 0 || !mountRef.current || !labelsRef.current) {
+      return;
+    }
 
-  const displayName = mounted ? (user?.username?.split("@")[0] ?? "Student") : "...";
+    let cleaned = false;
 
-  const masteryLabel = (level: string) => {
-    if (level === "unassessed") return { text: "Not assessed", color: "#494456" };
-    if (level === "beginner")    return { text: "Beginner",     color: "#7c3aed" };
-    if (level === "intermediate") return { text: "Intermediate", color: "#3b82f6" };
-    return { text: "Advanced", color: "#10b981" };
-  };
+    const setup = async () => {
+      const THREE = await ensureThreeR128();
+      if (cleaned || !mountRef.current || !labelsRef.current) return;
 
-  const prereqsMet = selectedTopic
-    ? selectedTopic.prerequisites.every(prereqId => {
-        const prereq = topics[prereqId];
-        return prereq && prereq.assessment_count > 0;
-      })
-    : true;
+      const mountEl = mountRef.current;
+      const labelsEl = labelsRef.current;
+      labelsEl.innerHTML = "";
 
-  const unmetPrereqIds = selectedTopic
-    ? selectedTopic.prerequisites.filter(id => topics[id]?.assessment_count === 0)
-    : [];
+      const width = mountEl.clientWidth;
+      const height = mountEl.clientHeight;
+
+      const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+      renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+      renderer.setSize(width, height);
+      renderer.setClearColor(0x000000, 0);
+      mountEl.appendChild(renderer.domElement);
+
+      const scene = new THREE.Scene();
+      const camera = new THREE.PerspectiveCamera(60, width / height, 0.1, 2000);
+      const initialRadius = isMobile ? 300 : isTablet ? 240 : 208.8;
+      const initialPhi = isMobile ? 1.12 : 1.279;
+      sphericalRef.current = { theta: 0, phi: initialPhi, radius: initialRadius };
+      camera.position.set(0, isMobile ? 80 : 60, initialRadius);
+      camera.lookAt(0, 0, 0);
+
+      const raycaster = new THREE.Raycaster();
+
+      rendererRef.current = renderer;
+      sceneRef.current = scene;
+      cameraRef.current = camera;
+      raycasterRef.current = raycaster;
+
+      nodeMeshMapRef.current = {};
+      nodeMetaRef.current = {};
+      ringMapRef.current = {};
+      labelMapRef.current = {};
+      edgeItemsRef.current = [];
+      advancedOrbitsRef.current = [];
+
+      scene.add(new THREE.AmbientLight(0xffffff, 0.25));
+
+      const keyLight = new THREE.PointLight(0x7c3aed, 1.4, 1000);
+      keyLight.position.set(0, 200, 260);
+      scene.add(keyLight);
+
+      const fillLight = new THREE.PointLight(0x2563eb, 1.1, 1000);
+      fillLight.position.set(-220, -120, 120);
+      scene.add(fillLight);
+
+      const rimLight = new THREE.PointLight(0x059669, 0.9, 1000);
+      rimLight.position.set(240, 80, -220);
+      scene.add(rimLight);
+
+      const starsGeo = new THREE.BufferGeometry();
+      const starPos = new Float32Array(1800 * 3);
+      for (let i = 0; i < 1800; i += 1) {
+        starPos[i * 3] = (Math.random() - 0.5) * 1800;
+        starPos[i * 3 + 1] = (Math.random() - 0.5) * 1800;
+        starPos[i * 3 + 2] = (Math.random() - 0.5) * 1800;
+      }
+      starsGeo.setAttribute("position", new THREE.BufferAttribute(starPos, 3));
+      const stars = new THREE.Points(
+        starsGeo,
+        new THREE.PointsMaterial({ color: 0xffffff, transparent: true, opacity: 0.22, size: 1.5, sizeAttenuation: true }),
+      );
+      scene.add(stars);
+
+      const lockTexture = buildLockTexture(THREE);
+
+      const positions: Record<string, any> = {};
+      Object.values(topics).forEach((topic) => {
+        const pos = buildDeterministicPosition(topic);
+        positions[topic.id] = new THREE.Vector3(pos.x, pos.y, pos.z);
+      });
+
+      Object.values(topics).forEach((topic) => {
+        const visual = getStateVisual(topic);
+        const mesh = new THREE.Mesh(
+          new THREE.SphereGeometry(visual.radius, 28, 28),
+          new THREE.MeshPhongMaterial({
+            color: new THREE.Color(visual.color),
+            transparent: true,
+            opacity: visual.opacity,
+            emissive: new THREE.Color(UNIT_META[topic.unit].color),
+            emissiveIntensity: visual.glow,
+            shininess: 80,
+          }),
+        );
+
+        mesh.position.copy(positions[topic.id]);
+        mesh.userData = {
+          id: topic.id,
+          state: topic.state,
+          baseOpacity: visual.opacity,
+          baseScale: 1,
+          clickable: visual.clickable,
+          pulse: visual.pulse,
+          filterUnit: topic.unit,
+          hoverScale: 1,
+          selectedScale: 1,
+        };
+
+        if (visual.wireframe) {
+          const wire = new THREE.Mesh(
+            new THREE.SphereGeometry(visual.radius + 0.35, 20, 20),
+            new THREE.MeshBasicMaterial({ color: 0x4a4a5e, transparent: true, opacity: 0.7, wireframe: true }),
+          );
+          mesh.add(wire);
+        }
+
+        if (visual.glow > 0) {
+          const glow = new THREE.Mesh(
+            new THREE.SphereGeometry(visual.radius * 1.3, 20, 20),
+            new THREE.MeshBasicMaterial({ color: new THREE.Color(UNIT_META[topic.unit].color), transparent: true, opacity: 0.15 + visual.glow * 0.1, side: THREE.BackSide }),
+          );
+          mesh.add(glow);
+        }
+
+        if (topic.state === "advanced") {
+          const core = new THREE.Mesh(
+            new THREE.SphereGeometry(visual.radius * 0.42, 18, 18),
+            new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.22 }),
+          );
+          mesh.add(core);
+
+          const orbitGroup = new THREE.Group();
+          for (let i = 0; i < 3; i += 1) {
+            const p = new THREE.Mesh(
+              new THREE.SphereGeometry(1, 10, 10),
+              new THREE.MeshBasicMaterial({ color: new THREE.Color(UNIT_META[topic.unit].color), transparent: true, opacity: 0.95 }),
+            );
+            p.userData.angle = (Math.PI * 2 * i) / 3;
+            orbitGroup.add(p);
+          }
+          mesh.add(orbitGroup);
+          advancedOrbitsRef.current.push({ topicId: topic.id, orbitGroup, angleOffset: Math.random() * Math.PI * 2 });
+        }
+
+        if (topic.state === "advanced" && visual.crown) {
+          const crown = new THREE.Mesh(
+            new THREE.SphereGeometry(1.4, 12, 12),
+            new THREE.MeshBasicMaterial({ color: 0xfbbf24 }),
+          );
+          crown.position.set(0, visual.radius + 4.2, 0);
+          mesh.add(crown);
+        }
+
+        if (topic.state === "locked") {
+          const lockSprite = new THREE.Sprite(new THREE.SpriteMaterial({ map: lockTexture, transparent: true, opacity: 0.9 }));
+          lockSprite.scale.set(10, 10, 1);
+          lockSprite.position.set(0, visual.radius + 8, 0);
+          mesh.add(lockSprite);
+        }
+
+        const ring = new THREE.Mesh(
+          new THREE.TorusGeometry(visual.radius + 2.4, 0.42, 12, 48),
+          new THREE.MeshBasicMaterial({ color: new THREE.Color(UNIT_META[topic.unit].color), transparent: true, opacity: 0.95 }),
+        );
+        ring.rotation.x = Math.PI / 2;
+        ring.visible = false;
+        mesh.add(ring);
+
+        ringMapRef.current[topic.id] = ring;
+
+        scene.add(mesh);
+        nodeMeshMapRef.current[topic.id] = mesh;
+        nodeMetaRef.current[topic.id] = {
+          position: { x: mesh.position.x, y: mesh.position.y, z: mesh.position.z },
+          visual,
+        };
+
+        const label = document.createElement("div");
+        label.textContent = getTopicLabel(topic.id);
+        label.style.position = "absolute";
+        label.style.pointerEvents = "none";
+        label.style.fontFamily = "Manrope, sans-serif";
+        label.style.fontSize = "11px";
+        label.style.color = visual.labelColor;
+        label.style.textShadow = "0 1px 4px rgba(0,0,0,0.8)";
+        label.style.transform = "translateX(-50%) translateY(-50%)";
+        label.style.whiteSpace = "nowrap";
+        label.style.fontWeight = topic.state === "advanced" ? "700" : "500";
+        labelsEl.appendChild(label);
+        labelMapRef.current[topic.id] = label;
+      });
+
+      Object.values(topics).forEach((target) => {
+        target.prerequisites.forEach((sourceId) => {
+          const source = topics[sourceId];
+          if (!source) return;
+
+          const sourceMesh = nodeMeshMapRef.current[sourceId];
+          const targetMesh = nodeMeshMapRef.current[target.id];
+          if (!sourceMesh || !targetMesh) return;
+
+          const sourcePos = sourceMesh.position.clone();
+          const targetPos = targetMesh.position.clone();
+
+          let edgeState: "locked" | "available" | "mastered" = "locked";
+
+          if ((source.state === "intermediate" || source.state === "advanced") && (target.state === "intermediate" || target.state === "advanced")) {
+            edgeState = "mastered";
+          } else if (source.p_known >= 0.7 && target.state === "unassessed") {
+            edgeState = "available";
+          } else if (source.state === "unassessed" || target.state === "unassessed") {
+            edgeState = "locked";
+          }
+
+          let line: any;
+          let dash: any;
+          let particles: any[] | undefined;
+
+          if (edgeState === "locked") {
+            const geom = new THREE.BufferGeometry().setFromPoints([sourcePos, targetPos]);
+            const mat = new THREE.LineDashedMaterial({ color: new THREE.Color(COLORS.border), transparent: true, opacity: 0.3, dashSize: 5, gapSize: 3 });
+            line = new THREE.Line(geom, mat);
+            line.computeLineDistances();
+            scene.add(line);
+          } else if (edgeState === "available") {
+            const baseGeom = new THREE.BufferGeometry().setFromPoints([sourcePos, targetPos]);
+            const baseMat = new THREE.LineBasicMaterial({ color: new THREE.Color(UNIT_META[target.unit].color), transparent: true, opacity: 0.5 });
+            line = new THREE.Line(baseGeom, baseMat);
+            scene.add(line);
+
+            const dashGeom = new THREE.BufferGeometry().setFromPoints([sourcePos, targetPos]);
+            const dashMat = new THREE.LineDashedMaterial({ color: new THREE.Color(UNIT_META[target.unit].color), transparent: true, opacity: 0.9, dashSize: 4, gapSize: 2 });
+            dash = new THREE.Line(dashGeom, dashMat);
+            dash.computeLineDistances();
+            dash.material.userData = { dashOffset: 0 };
+            scene.add(dash);
+          } else {
+            const geom = new THREE.BufferGeometry();
+            const points = new Float32Array([
+              sourcePos.x, sourcePos.y, sourcePos.z,
+              targetPos.x, targetPos.y, targetPos.z,
+            ]);
+            const colors = new Float32Array([
+              new THREE.Color(UNIT_META[source.unit].color).r,
+              new THREE.Color(UNIT_META[source.unit].color).g,
+              new THREE.Color(UNIT_META[source.unit].color).b,
+              new THREE.Color(UNIT_META[target.unit].color).r,
+              new THREE.Color(UNIT_META[target.unit].color).g,
+              new THREE.Color(UNIT_META[target.unit].color).b,
+            ]);
+            geom.setAttribute("position", new THREE.BufferAttribute(points, 3));
+            geom.setAttribute("color", new THREE.BufferAttribute(colors, 3));
+            const mat = new THREE.LineBasicMaterial({ vertexColors: true, transparent: true, opacity: 0.85 });
+            line = new THREE.Line(geom, mat);
+            scene.add(line);
+
+            particles = [];
+            for (let i = 0; i < 3; i += 1) {
+              const p = new THREE.Mesh(
+                new THREE.SphereGeometry(1.1, 8, 8),
+                new THREE.MeshBasicMaterial({ color: new THREE.Color(UNIT_META[target.unit].color), transparent: true, opacity: 0.95 }),
+              );
+              p.userData.t = i / 3;
+              scene.add(p);
+              particles.push(p);
+            }
+          }
+
+          edgeItemsRef.current.push({
+            sourceId,
+            targetId: target.id,
+            state: edgeState,
+            line,
+            dash,
+            particles,
+            from: sourcePos,
+            to: targetPos,
+          });
+        });
+      });
+
+      const onResize = () => {
+        if (!mountRef.current || !rendererRef.current || !cameraRef.current) return;
+        const w = mountRef.current.clientWidth;
+        const h = mountRef.current.clientHeight;
+        rendererRef.current.setSize(w, h);
+        cameraRef.current.aspect = w / h;
+        cameraRef.current.updateProjectionMatrix();
+      };
+
+      const setInteraction = () => {
+        if (!hasInteractedRef.current) {
+          hasInteractedRef.current = true;
+          autoRotateRef.current = false;
+        }
+      };
+
+      const canvas = renderer.domElement;
+
+      const updatePointerNorm = (clientX: number, clientY: number) => {
+        const rect = canvas.getBoundingClientRect();
+        pointerRef.current.x = ((clientX - rect.left) / rect.width) * 2 - 1;
+        pointerRef.current.y = -((clientY - rect.top) / rect.height) * 2 + 1;
+      };
+
+      const performHoverRaycast = (clientX: number, clientY: number) => {
+        updatePointerNorm(clientX, clientY);
+        raycaster.setFromCamera(pointerRef.current, camera);
+        const meshes = Object.values(nodeMeshMapRef.current);
+        const hits = raycaster.intersectObjects(meshes, false);
+        const hit = hits.find((h: any) => h.object?.userData?.id);
+
+        if (!hit) {
+          setHoveredTopicId(null);
+          setTooltip(null);
+          canvas.style.cursor = "default";
+          return;
+        }
+
+        const id = String(hit.object.userData.id);
+        const canClick = Boolean(hit.object.userData.clickable);
+        setHoveredTopicId(id);
+        setTooltip({ x: clientX, y: clientY, topicId: id });
+        canvas.style.cursor = canClick ? "pointer" : "default";
+      };
+
+      const onMouseDown = (e: MouseEvent) => {
+        dragRef.current.active = true;
+        dragRef.current.lastX = e.clientX;
+        dragRef.current.lastY = e.clientY;
+      };
+
+      const onMouseMove = (e: MouseEvent) => {
+        performHoverRaycast(e.clientX, e.clientY);
+        if (!dragRef.current.active) return;
+
+        const dx = e.clientX - dragRef.current.lastX;
+        const dy = e.clientY - dragRef.current.lastY;
+
+        if (Math.abs(dx) > 0 || Math.abs(dy) > 0) {
+          setInteraction();
+          sphericalRef.current.theta -= dx * 0.005;
+          sphericalRef.current.phi = Math.max(0.22, Math.min(Math.PI - 0.22, sphericalRef.current.phi + dy * 0.005));
+          dragRef.current.lastX = e.clientX;
+          dragRef.current.lastY = e.clientY;
+        }
+      };
+
+      const onMouseUp = () => {
+        dragRef.current.active = false;
+      };
+
+      const onWheel = (e: WheelEvent) => {
+        e.preventDefault();
+        setInteraction();
+        sphericalRef.current.radius = Math.max(80, Math.min(420, sphericalRef.current.radius + e.deltaY * 0.2));
+      };
+
+      const onClick = (e: MouseEvent) => {
+        updatePointerNorm(e.clientX, e.clientY);
+        raycaster.setFromCamera(pointerRef.current, camera);
+
+        const meshes = Object.values(nodeMeshMapRef.current);
+        const hits = raycaster.intersectObjects(meshes, false);
+        const hit = hits.find((h: any) => h.object?.userData?.id);
+
+        if (!hit) {
+          setSelectedTopicId(null);
+          return;
+        }
+
+        const id = String(hit.object.userData.id);
+        if (!hit.object.userData.clickable) return;
+        setSelectedTopicId(id);
+      };
+
+      const touchDistance = (t1: Touch, t2: Touch) => {
+        const dx = t1.clientX - t2.clientX;
+        const dy = t1.clientY - t2.clientY;
+        return Math.sqrt(dx * dx + dy * dy);
+      };
+
+      const onTouchStart = (e: TouchEvent) => {
+        setInteraction();
+        if (e.touches.length === 1) {
+          dragRef.current.active = true;
+          dragRef.current.lastX = e.touches[0].clientX;
+          dragRef.current.lastY = e.touches[0].clientY;
+        }
+        if (e.touches.length === 2) {
+          dragRef.current.touchDist = touchDistance(e.touches[0], e.touches[1]);
+        }
+      };
+
+      const onTouchMove = (e: TouchEvent) => {
+        if (e.touches.length === 1 && dragRef.current.active) {
+          const dx = e.touches[0].clientX - dragRef.current.lastX;
+          const dy = e.touches[0].clientY - dragRef.current.lastY;
+          sphericalRef.current.theta -= dx * 0.006;
+          sphericalRef.current.phi = Math.max(0.22, Math.min(Math.PI - 0.22, sphericalRef.current.phi + dy * 0.006));
+          dragRef.current.lastX = e.touches[0].clientX;
+          dragRef.current.lastY = e.touches[0].clientY;
+        }
+
+        if (e.touches.length === 2) {
+          const nextDist = touchDistance(e.touches[0], e.touches[1]);
+          const delta = dragRef.current.touchDist - nextDist;
+          sphericalRef.current.radius = Math.max(80, Math.min(420, sphericalRef.current.radius + delta * 0.4));
+          dragRef.current.touchDist = nextDist;
+        }
+      };
+
+      const onTouchEnd = () => {
+        dragRef.current.active = false;
+      };
+
+      window.addEventListener("resize", onResize);
+      canvas.addEventListener("mousedown", onMouseDown);
+      window.addEventListener("mousemove", onMouseMove);
+      window.addEventListener("mouseup", onMouseUp);
+      canvas.addEventListener("wheel", onWheel, { passive: false });
+      canvas.addEventListener("click", onClick);
+      canvas.addEventListener("touchstart", onTouchStart, { passive: true });
+      canvas.addEventListener("touchmove", onTouchMove, { passive: true });
+      canvas.addEventListener("touchend", onTouchEnd, { passive: true });
+
+      const tmpVec = new THREE.Vector3();
+      const clock = new THREE.Clock();
+
+      const animate = () => {
+        if (cleaned) return;
+
+        const t = clock.getElapsedTime();
+
+        if (autoRotateRef.current) {
+          sphericalRef.current.theta += 0.001;
+        }
+
+        const theta = sphericalRef.current.theta;
+        const phi = sphericalRef.current.phi;
+        const radius = sphericalRef.current.radius;
+
+        camera.position.set(
+          radius * Math.sin(phi) * Math.sin(theta),
+          radius * Math.cos(phi),
+          radius * Math.sin(phi) * Math.cos(theta),
+        );
+        camera.lookAt(0, 0, 0);
+
+        Object.values(topics).forEach((topic) => {
+          const mesh = nodeMeshMapRef.current[topic.id];
+          const visual = nodeMetaRef.current[topic.id]?.visual;
+          if (!mesh || !visual) return;
+
+          const mat = mesh.material;
+
+          const filterFactor = unitFilter === "all" || unitFilter === topic.unit ? 1 : 0.1;
+          const targetOpacity = visual.opacity * filterFactor;
+          mat.opacity += (targetOpacity - mat.opacity) * 0.1;
+
+            const isHovered = hoveredTopicIdRef.current === topic.id;
+            const isSelected = selectedTopicIdRef.current === topic.id;
+
+          let pulse = 1;
+          if (visual.pulse) {
+            pulse = 1 + 0.05 * Math.sin((Math.PI * 2 * t) / 3);
+          }
+
+          const hoverScale = isHovered ? 1.2 : 1;
+          const selectedScale = isSelected ? 1.3 : 1;
+          const targetScale = pulse * hoverScale * selectedScale;
+          mesh.scale.x += (targetScale - mesh.scale.x) * 0.15;
+          mesh.scale.y += (targetScale - mesh.scale.y) * 0.15;
+          mesh.scale.z += (targetScale - mesh.scale.z) * 0.15;
+
+          const ring = ringMapRef.current[topic.id];
+          if (ring) {
+            ring.visible = isSelected;
+            if (isSelected) {
+              ring.rotation.z += 0.02;
+            }
+          }
+
+          if (topic.state === "intermediate") {
+            mat.emissiveIntensity = visual.glow + 0.08 * Math.sin(t * 1.5);
+          } else if (topic.state === "advanced") {
+            mat.emissiveIntensity = visual.glow + 0.18 * Math.sin(t * 2);
+          } else {
+            mat.emissiveIntensity = visual.glow;
+          }
+
+          const label = labelMapRef.current[topic.id];
+          if (label) {
+            tmpVec.copy(mesh.position);
+            tmpVec.project(camera);
+
+            const lx = (tmpVec.x * 0.5 + 0.5) * width;
+            const ly = (-tmpVec.y * 0.5 + 0.5) * height;
+
+            label.style.left = `${lx}px`;
+            label.style.top = `${ly}px`;
+            const shouldShowLabel = !isMobile || isSelected || isHovered || topic.state === "advanced";
+            label.style.display = tmpVec.z > 1 || !shouldShowLabel ? "none" : "block";
+
+            if (isHovered || isSelected) {
+              label.style.fontSize = isMobile ? "12px" : "13px";
+              label.style.color = COLORS.textPrimary;
+              label.style.fontWeight = "700";
+            } else {
+              label.style.fontSize = isMobile ? "10px" : "11px";
+              label.style.color = visual.labelColor;
+              label.style.fontWeight = topic.state === "advanced" ? "700" : "500";
+            }
+          }
+        });
+
+        edgeItemsRef.current.forEach((edge) => {
+          const sourceTopic = topicsRef.current[edge.sourceId];
+          const targetTopic = topicsRef.current[edge.targetId];
+
+          const activeFilter = unitFilterRef.current;
+          const fade = activeFilter === "all" || sourceTopic?.unit === activeFilter || targetTopic?.unit === activeFilter ? 1 : 0.08;
+
+          if (edge.line?.material) {
+            edge.line.material.opacity += ((edge.state === "mastered" ? 0.85 : edge.state === "available" ? 0.5 : 0.3) * fade - edge.line.material.opacity) * 0.1;
+          }
+
+          if (edge.state === "available" && edge.dash?.material) {
+            edge.dash.material.opacity += (0.9 * fade - edge.dash.material.opacity) * 0.1;
+            edge.dash.material.userData.dashOffset = (edge.dash.material.userData.dashOffset || 0) - 0.08;
+            edge.dash.material.dashOffset = edge.dash.material.userData.dashOffset;
+          }
+
+          if (edge.state === "mastered" && edge.particles?.length) {
+            edge.particles.forEach((particle) => {
+              particle.visible = fade > 0.09;
+              particle.material.opacity = 0.85 * fade;
+              particle.userData.t = (particle.userData.t + 0.008) % 1;
+              const tt = particle.userData.t;
+              particle.position.set(
+                edge.from.x + (edge.to.x - edge.from.x) * tt,
+                edge.from.y + (edge.to.y - edge.from.y) * tt,
+                edge.from.z + (edge.to.z - edge.from.z) * tt,
+              );
+            });
+          }
+        });
+
+        advancedOrbitsRef.current.forEach((item) => {
+          const mesh = nodeMeshMapRef.current[item.topicId];
+          if (!mesh) return;
+          item.orbitGroup.children.forEach((child: any, idx: number) => {
+            const base = (child.userData.angle || 0) + item.angleOffset + t * (0.8 + idx * 0.2);
+            const r = 10 + idx * 1.5;
+            child.position.set(Math.cos(base) * r, Math.sin(base * 1.2) * 2.5, Math.sin(base) * r);
+          });
+        });
+
+        renderer.render(scene, camera);
+        frameRef.current = requestAnimationFrame(animate);
+      };
+
+      frameRef.current = requestAnimationFrame(animate);
+
+      const cleanup = () => {
+        cancelAnimationFrame(frameRef.current);
+
+        window.removeEventListener("resize", onResize);
+        canvas.removeEventListener("mousedown", onMouseDown);
+        window.removeEventListener("mousemove", onMouseMove);
+        window.removeEventListener("mouseup", onMouseUp);
+        canvas.removeEventListener("wheel", onWheel);
+        canvas.removeEventListener("click", onClick);
+        canvas.removeEventListener("touchstart", onTouchStart);
+        canvas.removeEventListener("touchmove", onTouchMove);
+        canvas.removeEventListener("touchend", onTouchEnd);
+
+        Object.values(labelMapRef.current).forEach((el) => el.remove());
+        labelMapRef.current = {};
+
+        edgeItemsRef.current.forEach((edge) => {
+          if (edge.line) scene.remove(edge.line);
+          if (edge.dash) scene.remove(edge.dash);
+          edge.particles?.forEach((p) => scene.remove(p));
+        });
+        edgeItemsRef.current = [];
+
+        Object.values(nodeMeshMapRef.current).forEach((mesh) => {
+          scene.remove(mesh);
+          mesh.geometry?.dispose?.();
+          mesh.material?.dispose?.();
+        });
+
+        nodeMeshMapRef.current = {};
+        ringMapRef.current = {};
+        advancedOrbitsRef.current = [];
+
+        renderer.dispose();
+        if (renderer.domElement.parentElement === mountEl) {
+          mountEl.removeChild(renderer.domElement);
+        }
+      };
+
+      (renderer as any).__cleanup = cleanup;
+    };
+
+    setup();
+
+    return () => {
+      cleaned = true;
+      const r = rendererRef.current as any;
+      if (r?.__cleanup) {
+        r.__cleanup();
+      }
+      rendererRef.current = null;
+      sceneRef.current = null;
+      cameraRef.current = null;
+      raycasterRef.current = null;
+    };
+  }, [topics, loading, isMobile, isTablet]);
+
+  const tooltipTopic = tooltip?.topicId ? topics[tooltip.topicId] : null;
+
+  const canStartLearning = selectedTopic && selectedTopic.state !== "locked";
+  const showTestMyself = selectedTopic && (selectedTopic.state === "intermediate" || selectedTopic.state === "advanced");
+
+  if (!mounted) {
+    return (
+      <div style={{
+        height: "100vh",
+        background: "#0a0a0f",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+      }}>
+        <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
+        <div style={{
+          width: 32,
+          height: 32,
+          border: "2px solid #7c3aed",
+          borderTopColor: "transparent",
+          borderRadius: "50%",
+          animation: "spin 0.8s linear infinite",
+        }} />
+      </div>
+    );
+  }
 
   return (
-    <>
+    <div style={{ width: "100vw", height: "100vh", background: COLORS.bg, position: "relative", overflow: "hidden", fontFamily: "Manrope, sans-serif" }}>
       <style>{`
-        @import url('https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&family=Newsreader:ital,opsz,wght@0,6..72,400;1,6..72,400&display=swap');
-        @import url('https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=swap');
-        *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
-        html, body { background: #0a0a0f; overflow: hidden; }
-        .material-symbols-outlined { font-family: 'Material Symbols Outlined'; font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24; display: inline-block; line-height: 1; vertical-align: middle; }
-        ::-webkit-scrollbar { width: 4px; }
-        ::-webkit-scrollbar-thumb { background: #2a2a2a; border-radius: 10px; }
-        @keyframes slideIn { from { transform: translateX(100%); opacity: 0; } to { transform: translateX(0); opacity: 1; } }
-        @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
-        @keyframes pulse { 0%,100% { opacity: 0.6; } 50% { opacity: 1; } }
+        * { box-sizing: border-box; }
+        html, body { margin: 0; padding: 0; background: #0a0a0f; }
+        .material-symbols-outlined {
+          font-family: 'Material Symbols Outlined';
+          font-weight: normal;
+          font-style: normal;
+          font-size: 20px;
+          line-height: 1;
+          display: inline-block;
+          white-space: nowrap;
+          direction: ltr;
+          -webkit-font-feature-settings: 'liga';
+          -webkit-font-smoothing: antialiased;
+        }
       `}</style>
 
-      <div style={{ width: "100vw", height: "100vh", background: "radial-gradient(ellipse at center, #0f0818 0%, #050508 70%)", position: "relative", overflow: "hidden", fontFamily: "Manrope, sans-serif" }}>
+      <div ref={mountRef} style={{ position: "absolute", inset: 0, zIndex: 1 }} />
+      <div ref={labelsRef} style={{ position: "absolute", inset: 0, zIndex: 2, pointerEvents: "none" }} />
 
-        {/* ── Sidebar ── */}
-        <Sidebar
-          onCollapse={(c: boolean) => setSidebarWidth(c ? 60 : 252)}
-          chatPath="/business-analytics"
-          graphPath="/business-analytics/graph"
-        />
-
-        {/* ── Top bar (legend only) ── */}
-        <div style={{ position: "absolute", top: 0, left: sidebarWidth, right: 0, zIndex: 20, padding: "16px 24px", display: "flex", alignItems: "center", justifyContent: "space-between", background: "linear-gradient(to bottom, rgba(5,5,8,0.9), transparent)", transition: "left 0.25s cubic-bezier(0.16,1,0.3,1)" }}>
-          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-            <div style={{ width: 28, height: 28, borderRadius: 8, background: "linear-gradient(135deg, #6e28f5, #3d1a8f)", display: "flex", alignItems: "center", justifyContent: "center" }}>
-              <span className="material-symbols-outlined" style={{ color: "white", fontSize: 14, fontVariationSettings: "'FILL' 1" }}>hub</span>
-            </div>
-            <span style={{ fontSize: 16, fontWeight: 800, color: "#e2e2e2", letterSpacing: "-0.03em" }}>BA Knowledge Graph</span>
+      {!isMobile && tooltip && tooltipTopic && (
+        <div
+          style={{
+            position: "fixed",
+            left: tooltip.x + 16,
+            top: tooltip.y + 16,
+            width: 200,
+            background: COLORS.surfaceRaised,
+            border: `1px solid ${COLORS.border}`,
+            borderRadius: 8,
+            padding: "10px 14px",
+            boxShadow: "0 8px 24px rgba(0,0,0,0.5)",
+            zIndex: 30,
+            pointerEvents: "none",
+          }}
+        >
+          <div style={{ color: COLORS.textPrimary, fontWeight: 600, fontSize: 13, marginBottom: 8 }}>{getTopicLabel(tooltipTopic.id)}</div>
+          <div style={{ width: "100%", height: 4, borderRadius: 4, background: COLORS.border, overflow: "hidden", marginBottom: 6 }}>
+            <div style={{ width: `${Math.round((tooltipTopic.p_known || 0) * 100)}%`, height: "100%", background: UNIT_META[tooltipTopic.unit].color }} />
           </div>
-          {/* Legend */}
-          <div style={{ display: "flex", alignItems: "center", gap: 16 }}>
-            {[
-              { label: "Unit 1", color: "#6e28f5" },
-              { label: "Unit 2", color: "#2563eb" },
-              { label: "Unit 3", color: "#059669" },
-              { label: "Unit 4", color: "#dc2626" },
-            ].map(l => (
-              <div key={l.label} style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                <div style={{ width: 8, height: 8, borderRadius: "50%", background: l.color, boxShadow: `0 0 6px ${l.color}` }} />
-                <span style={{ fontSize: 11, color: "#494456", fontWeight: 600 }}>{l.label}</span>
-              </div>
-            ))}
-          </div>
+          <div style={{ color: COLORS.textSecondary, fontSize: 11 }}>{Math.round((tooltipTopic.p_known || 0) * 100)}% mastery</div>
+          {tooltipTopic.session_count > 0 && (
+            <div style={{ color: COLORS.textSecondary, fontSize: 11, marginTop: 4 }}>Sessions: {tooltipTopic.session_count}</div>
+          )}
         </div>
+      )}
 
-        {loadError && !loading && (
-          <div style={{ position: "absolute", top: 66, left: sidebarWidth + 24, zIndex: 21, background: "rgba(239,68,68,0.12)", border: "1px solid rgba(239,68,68,0.35)", color: "#fca5a5", borderRadius: 10, padding: "8px 12px", fontSize: 12, fontWeight: 600 }}>
-            {loadError}
+      <button
+        onClick={() => router.push("/business-analytics")}
+        style={{
+          position: "absolute",
+          top: isMobile ? 10 : 16,
+          left: isMobile ? 10 : 16,
+          zIndex: 20,
+          background: COLORS.surfaceRaised,
+          border: `1px solid ${COLORS.border}`,
+          borderRadius: 8,
+          padding: isMobile ? "10px" : "8px 14px",
+          minWidth: isMobile ? 44 : "auto",
+          minHeight: isMobile ? 44 : "auto",
+          display: "flex",
+          alignItems: "center",
+          gap: isMobile ? 0 : 6,
+          fontSize: 13,
+          color: COLORS.textSecondary,
+          cursor: "pointer",
+        }}
+      >
+        <span className="material-symbols-outlined" style={materialIconStyle(20, "#8b8b9e")}>arrow_back</span>
+        {!isMobile && <span>Workspace</span>}
+      </button>
+
+      <div style={{ position: "absolute", top: isMobile ? 20 : 16, left: "50%", transform: "translateX(-50%)", zIndex: 20, color: COLORS.textPrimary, fontSize: isMobile ? 13 : 14, fontWeight: 600 }}>
+        Knowledge Graph
+      </div>
+
+      <div style={{ position: "absolute", top: isMobile ? 10 : 16, right: isMobile ? 10 : 16, zIndex: 20, display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 8 }}>
+        {isMobile && (
+          <div style={{ background: COLORS.surfaceRaised, border: `1px solid ${COLORS.border}`, borderRadius: 999, padding: "6px 10px", color: COLORS.textSecondary, fontSize: 11 }}>
+            {advancedCount}/23 mastered
           </div>
         )}
+        <button
+          onClick={() => setLegendOpen((v) => !v)}
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: 6,
+            background: COLORS.surfaceRaised,
+            border: `1px solid ${COLORS.border}`,
+            borderRadius: 8,
+            padding: isMobile ? "10px" : "7px 10px",
+            minWidth: isMobile ? 44 : "auto",
+            minHeight: isMobile ? 44 : "auto",
+            color: COLORS.textSecondary,
+            cursor: "pointer",
+            marginLeft: "auto",
+          }}
+        >
+          <span className="material-symbols-outlined" style={materialIconStyle(20, "#8b8b9e")}>legend_toggle</span>
+          {!isMobile && <span style={{ fontSize: 12 }}>Legend</span>}
+        </button>
 
-        {/* ── Hint ── */}
-        {!loading && (
-          <div style={{ position: "absolute", bottom: 24, left: `calc(${sidebarWidth}px + 50%)`, transform: "translateX(-50%)", zIndex: 20, display: "flex", alignItems: "center", gap: 16, background: "rgba(0,0,0,0.4)", border: "1px solid rgba(255,255,255,0.05)", borderRadius: 20, padding: "8px 20px", animation: "fadeIn 1s ease 2s both" }}>
+        {legendOpen && (
+          <div style={{ marginTop: 0, background: COLORS.surfaceRaised, border: `1px solid ${COLORS.border}`, borderRadius: 10, padding: 10, width: isMobile ? 168 : 200 }}>
             {[
-              { icon: "drag_pan", text: "Drag to orbit" },
-              { icon: "scroll", text: "Scroll to zoom" },
-              { icon: "ads_click", text: "Click node for details" },
-            ].map(h => (
-              <div key={h.text} style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                <span className="material-symbols-outlined" style={{ fontSize: 14, color: "#494456" }}>{h.icon}</span>
-                <span style={{ fontSize: 11, color: "#333", fontWeight: 600 }}>{h.text}</span>
+              { label: "Unassessed", color: "#4a4a5e" },
+              { label: "Exploring", color: "#8b8b9e" },
+              { label: "Intermediate", color: "#f0f0f5" },
+              { label: "Advanced", color: "#ffffff" },
+            ].map((item) => (
+              <div key={item.label} style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 6 }}>
+                <span style={{ width: 8, height: 8, borderRadius: 999, background: item.color, display: "inline-block" }} />
+                <span style={{ fontSize: 12, color: COLORS.textSecondary }}>{item.label}</span>
               </div>
             ))}
-          </div>
-        )}
-
-        {/* ── Loading ── */}
-        {loading && (
-          <div style={{ position: "absolute", inset: 0, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 16, zIndex: 30 }}>
-            <div style={{ width: 40, height: 40, borderRadius: "50%", border: "2px solid rgba(110,40,245,0.2)", borderTopColor: "#6e28f5", animation: "spin 0.8s linear infinite" }} />
-            <p style={{ color: "#494456", fontSize: 13, fontWeight: 600 }}>Loading knowledge graph…</p>
-            <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
-          </div>
-        )}
-
-        {/* ── Three.js Canvas Mount ── */}
-        <div ref={mountRef} style={{ position: "absolute", left: sidebarWidth, top: 0, right: 0, bottom: 0, cursor: "grab", transition: "left 0.25s cubic-bezier(0.16,1,0.3,1)" }} />
-
-        {/* ── Side Panel ── */}
-        {panelOpen && selectedTopic && (
-          <div style={{
-            position: "absolute", top: 0, right: 0, bottom: 0, width: 320,
-            background: "rgba(10,10,15,0.92)", backdropFilter: "blur(20px)",
-            borderLeft: "1px solid rgba(110,40,245,0.15)",
-            zIndex: 30, animation: "slideIn 0.3s cubic-bezier(0.16,1,0.3,1) forwards",
-            display: "flex", flexDirection: "column", overflow: "hidden",
-          }}>
-            {/* Panel header */}
-            <div style={{ padding: "20px 20px 16px", borderBottom: "1px solid rgba(255,255,255,0.05)" }}>
-              <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", marginBottom: 12 }}>
-                <div>
-                  <h2 style={{ fontSize: 18, fontWeight: 800, color: "#e2e2e2", letterSpacing: "-0.02em", margin: "0 0 6px" }}>
-                    {selectedTopic.name}
-                  </h2>
-                  <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                    {(() => { const m = masteryLabel(selectedTopic.level); return (
-                      <span style={{ fontSize: 10, fontWeight: 700, color: m.color, textTransform: "uppercase", letterSpacing: "0.1em", padding: "3px 8px", borderRadius: 6, background: `${m.color}18`, border: `1px solid ${m.color}40` }}>
-                        {m.text}
-                      </span>
-                    ); })()}
-                  </div>
-                </div>
-                <button onClick={() => setPanelOpen(false)}
-                  style={{ background: "none", border: "none", cursor: "pointer", color: "#494456", padding: 4 }}
-                  onMouseEnter={e => e.currentTarget.style.color = "#e2e2e2"}
-                  onMouseLeave={e => e.currentTarget.style.color = "#494456"}
-                >
-                  <span className="material-symbols-outlined" style={{ fontSize: 20 }}>close</span>
-                </button>
-              </div>
-              <p style={{ fontSize: 12, color: "#494456", lineHeight: 1.6, margin: 0 }}>{selectedTopic.description}</p>
-            </div>
-
-            {/* Panel body */}
-            <div style={{ flex: 1, overflowY: "auto", padding: 20, display: "flex", flexDirection: "column", gap: 20 }}>
-
-              {/* Mastery score */}
-              <div>
-                <p style={{ fontSize: 10, fontWeight: 700, color: "#333", textTransform: "uppercase", letterSpacing: "0.1em", marginBottom: 10 }}>Mastery</p>
-                <div style={{ background: "#0f0f18", borderRadius: 12, padding: "14px 16px", border: "1px solid rgba(255,255,255,0.04)" }}>
-                  {selectedTopic.level === "unassessed" ? (
-                    <div style={{ display: "flex", flexDirection: "column", gap: 8, marginTop: 8 }}>
-                      <button
-                        onClick={() => {
-                          const topicNameEncoded = encodeURIComponent(selectedTopic.name);
-                          router.push(`/business-analytics?mcq=${topicNameEncoded}`);
-                        }}
-                        style={{
-                          padding: "10px 14px", borderRadius: 10, border: "none",
-                          background: "linear-gradient(135deg, #6e28f5, #3d1a8f)",
-                          color: "white", fontFamily: "inherit", fontSize: 13,
-                          fontWeight: 700, cursor: "pointer", textAlign: "left",
-                          display: "flex", alignItems: "center", gap: 8
-                        }}
-                      >
-                        <span className="material-symbols-outlined" style={{ fontSize: 16 }}>quiz</span>
-                        Start assessment now
-                      </button>
-
-                      <button
-                        onClick={() => {
-                          const msg = `Teach me about ${selectedTopic.name}`;
-                          router.push(`/business-analytics?prompt=${encodeURIComponent(msg)}`);
-                        }}
-                        style={{
-                          padding: "10px 14px", borderRadius: 10,
-                          border: "1px solid rgba(110,40,245,0.3)",
-                          background: "transparent", color: "#a78bfa",
-                          fontFamily: "inherit", fontSize: 13,
-                          fontWeight: 600, cursor: "pointer", textAlign: "left",
-                          display: "flex", alignItems: "center", gap: 8
-                        }}
-                      >
-                        <span className="material-symbols-outlined" style={{ fontSize: 16 }}>school</span>
-                        Learn this topic first
-                      </button>
-                    </div>
-                  ) : (
-                    <>
-                      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 8 }}>
-                        <span style={{ fontSize: 28, fontWeight: 800, color: masteryLabel(selectedTopic.level).color, fontFamily: "Newsreader, serif", fontStyle: "italic" }}>
-                          {Math.round(selectedTopic.p_known * 100)}%
-                        </span>
-                        <span style={{ fontSize: 11, color: "#333", fontWeight: 600 }}>{selectedTopic.assessment_count} assessments</span>
-                      </div>
-                      <div style={{ height: 4, background: "#1a1a2a", borderRadius: 2, overflow: "hidden" }}>
-                        <div style={{ height: "100%", width: `${selectedTopic.p_known * 100}%`, background: `linear-gradient(90deg, ${masteryLabel(selectedTopic.level).color}88, ${masteryLabel(selectedTopic.level).color})`, borderRadius: 2, transition: "width 0.8s ease" }} />
-                      </div>
-                    </>
-                  )}
-                </div>
-              </div>
-
-              {/* Subtopics */}
-              {selectedTopic.subtopics.length > 0 && (
-                <div>
-                  <p style={{ fontSize: 10, fontWeight: 700, color: "#333", textTransform: "uppercase", letterSpacing: "0.1em", marginBottom: 10 }}>Subtopics</p>
-                  <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
-                    {selectedTopic.subtopics.map(s => (
-                      <span key={s} style={{ fontSize: 11, fontWeight: 600, color: "#6e28f5", background: "rgba(110,40,245,0.08)", border: "1px solid rgba(110,40,245,0.2)", borderRadius: 6, padding: "4px 10px" }}>{s}</span>
-                    ))}
-                  </div>
-                </div>
-              )}
-
-              {/* Prerequisites */}
-              {selectedTopic.prerequisites.length > 0 && (
-                <div>
-                  <p style={{ fontSize: 10, fontWeight: 700, color: "#333", textTransform: "uppercase", letterSpacing: "0.1em", marginBottom: 10 }}>Prerequisites</p>
-                  <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-                    {selectedTopic.prerequisites.map(prereqId => {
-                      const prereq = topics[prereqId];
-                      if (!prereq) return null;
-                      const m = masteryLabel(prereq.level);
-                      return (
-                        <button key={prereqId}
-                          onClick={() => { setSelectedTopic(prereq); }}
-                          style={{ display: "flex", alignItems: "center", gap: 10, padding: "8px 12px", background: "#0f0f18", border: "1px solid rgba(255,255,255,0.04)", borderRadius: 10, cursor: "pointer", textAlign: "left", transition: "all 0.15s", fontFamily: "inherit" }}
-                          onMouseEnter={e => e.currentTarget.style.borderColor = "rgba(110,40,245,0.3)"}
-                          onMouseLeave={e => e.currentTarget.style.borderColor = "rgba(255,255,255,0.04)"}
-                        >
-                          <div style={{ width: 8, height: 8, borderRadius: "50%", background: m.color, flexShrink: 0, boxShadow: `0 0 4px ${m.color}` }} />
-                          <span style={{ fontSize: 13, fontWeight: 600, color: "#cbc3d9", flex: 1 }}>{prereq.name}</span>
-                          <span style={{ fontSize: 10, color: m.color, fontWeight: 700 }}>{m.text}</span>
-                        </button>
-                      );
-                    })}
-                  </div>
-                </div>
-              )}
-
-              {/* Quick MCQ button */}
-              <div style={{ marginTop: "auto" }}>
-                {!prereqsMet && selectedTopic.prerequisites.length > 0 ? (
-                  <div style={{
-                    padding: "10px 14px", borderRadius: 10,
-                    background: "rgba(245,158,11,0.08)",
-                    border: "1px solid rgba(245,158,11,0.2)",
-                    marginTop: "auto"
-                  }}>
-                    <p style={{ fontSize: 12, color: "#f59e0b", fontWeight: 600, margin: "0 0 6px" }}>
-                      ⚠ Complete prerequisites first
-                    </p>
-                    <p style={{ fontSize: 11, color: "#888", margin: 0, lineHeight: 1.5 }}>
-                      Assess these topics before testing here:
-                    </p>
-                    <div style={{ marginTop: 6, display: "flex", flexDirection: "column", gap: 4 }}>
-                      {unmetPrereqIds.map(id => (
-                        <span key={id} style={{ fontSize: 11, color: "#f59e0b", fontWeight: 600 }}>
-                          • {topics[id]?.name}
-                        </span>
-                      ))}
-                    </div>
-                  </div>
-                ) : (
-                  <button
-                    onClick={() => {
-                      const topicNameEncoded = encodeURIComponent(selectedTopic.name);
-                      router.push(`/business-analytics?mcq=${topicNameEncoded}`);
-                    }}
-                    style={{ width: "100%", padding: "11px", borderRadius: 12, border: "none", background: "linear-gradient(135deg, #6e28f5, #3d1a8f)", color: "white", fontFamily: "inherit", fontSize: 13, fontWeight: 700, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", gap: 8, transition: "opacity 0.15s" }}
-                    onMouseEnter={e => e.currentTarget.style.opacity = "0.85"}
-                    onMouseLeave={e => e.currentTarget.style.opacity = "1"}
-                  >
-                    <span className="material-symbols-outlined" style={{ fontSize: 16 }}>quiz</span>
-                    Test my knowledge
-                  </button>
-                )}
-              </div>
-            </div>
           </div>
         )}
       </div>
-    </>
+
+      <div style={{ position: "absolute", bottom: isMobile ? 10 : 16, left: "50%", transform: "translateX(-50%)", zIndex: 20, display: "flex", gap: 8, background: "transparent", maxWidth: isMobile ? "94vw" : "none", overflowX: isMobile ? "auto" : "visible", paddingBottom: isMobile ? "env(safe-area-inset-bottom)" : 0 }}>
+        {([
+          { id: "all", label: "All" },
+          { id: 1, label: "Foundations" },
+          { id: 2, label: "Customer" },
+          { id: 3, label: "Forecasting" },
+          { id: 4, label: "Advanced" },
+        ] as Array<{ id: UnitFilter; label: string }>).map((item) => {
+          const active = unitFilter === item.id;
+          const activeColor = item.id === "all" ? COLORS.primary : UNIT_META[item.id as UnitId].color;
+          return (
+            <button
+              key={String(item.id)}
+              onClick={() => setUnitFilter(item.id)}
+              style={{
+                border: `1px solid ${active ? activeColor : COLORS.border}`,
+                background: active ? activeColor : COLORS.surfaceRaised,
+                color: active ? "#fff" : COLORS.textSecondary,
+                borderRadius: 999,
+                padding: isMobile ? "10px 12px" : "7px 12px",
+                minHeight: isMobile ? 44 : "auto",
+                fontSize: 12,
+                cursor: "pointer",
+                whiteSpace: "nowrap",
+              }}
+            >
+              {isMobile ? (item.id === 1 ? "Fdn" : item.id === 2 ? "Cust" : item.id === 3 ? "Fcast" : item.id === 4 ? "Adv" : "All") : item.label}
+            </button>
+          );
+        })}
+      </div>
+
+      {!isMobile && (
+        <div
+          style={{
+            position: "absolute",
+            left: 16,
+            bottom: 16,
+            width: 260,
+            background: COLORS.surfaceRaised,
+            border: `1px solid ${COLORS.border}`,
+            borderRadius: 10,
+            padding: 12,
+            zIndex: 20,
+          }}
+        >
+          <div style={{ color: COLORS.textPrimary, fontSize: 13, fontWeight: 600, marginBottom: 8 }}>Course Progress</div>
+          <div style={{ width: "100%", height: 6, borderRadius: 3, background: COLORS.surface, overflow: "hidden", marginBottom: 8 }}>
+            <div
+              style={{
+                width: `${(advancedCount / 23) * 100}%`,
+                height: "100%",
+                background: "linear-gradient(90deg, #7c3aed 0%, #2563eb 100%)",
+              }}
+            />
+          </div>
+          <div style={{ color: COLORS.textSecondary, fontSize: 12 }}>{advancedCount} of 23 topics mastered</div>
+        </div>
+      )}
+
+      {loading && (
+        <div style={{ position: "absolute", inset: 0, zIndex: 22, background: "rgba(10,10,15,0.62)", display: "flex", alignItems: "center", justifyContent: "center", color: COLORS.textSecondary, fontSize: 14 }}>
+          Building knowledge graph...
+        </div>
+      )}
+
+      {isMobile && selectedTopic && (
+        <div onClick={() => setSelectedTopicId(null)} style={{ position: "absolute", inset: 0, background: "rgba(0,0,0,0.58)", zIndex: 23 }} />
+      )}
+
+      <div
+        style={isMobile ? {
+          position: "absolute",
+          left: 0,
+          right: 0,
+          bottom: 0,
+          width: "100%",
+          height: "82vh",
+          background: "#0d0d14",
+          borderTop: `1px solid ${COLORS.border}`,
+          borderRadius: "16px 16px 0 0",
+          transform: selectedTopic ? "translateY(0)" : "translateY(100%)",
+          transition: "transform 0.24s ease",
+          zIndex: 24,
+          display: "flex",
+          flexDirection: "column",
+          pointerEvents: selectedTopic ? "auto" : "none",
+        } : {
+          position: "absolute",
+          top: 0,
+          right: 0,
+          width: isTablet ? 300 : 320,
+          height: "100%",
+          background: "#0d0d14",
+          borderLeft: `1px solid ${COLORS.border}`,
+          transform: selectedTopic ? "translateX(0)" : "translateX(100%)",
+          transition: "transform 0.22s ease",
+          zIndex: 24,
+          display: "flex",
+          flexDirection: "column",
+        }}
+      >
+        {selectedTopic && (
+          <>
+            {isMobile && <div style={{ width: 32, height: 4, borderRadius: 2, background: COLORS.border, margin: "10px auto 2px" }} />}
+            <div style={{ height: 4, width: "100%", background: UNIT_META[selectedTopic.unit].color }} />
+            <div style={{ padding: isMobile ? "16px 16px" : 20, borderBottom: `1px solid ${COLORS.border}`, position: "relative" }}>
+              <button
+                onClick={() => setSelectedTopicId(null)}
+                style={{
+                  position: "absolute",
+                  top: isMobile ? 10 : 16,
+                  right: isMobile ? 10 : 16,
+                  border: "none",
+                  background: "transparent",
+                  color: COLORS.textMuted,
+                  cursor: "pointer",
+                  width: isMobile ? 44 : "auto",
+                  height: isMobile ? 44 : "auto",
+                }}
+              >
+                <span className="material-symbols-outlined" style={materialIconStyle(18, "#8b8b9e")}>close</span>
+              </button>
+              <div style={{ fontSize: isMobile ? 18 : 20, fontWeight: 700, color: COLORS.textPrimary, lineHeight: 1.3, paddingRight: 32 }}>{getTopicLabel(selectedTopic.id)}</div>
+            </div>
+
+            <div style={{ flex: 1, overflowY: "auto", padding: isMobile ? "14px 16px 150px" : "16px 20px 120px" }}>
+              <div style={{ marginBottom: 18 }}>
+                <div style={{ color: COLORS.textSecondary, fontSize: 12, marginBottom: 8 }}>Mastery</div>
+                <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
+                  <svg width="80" height="80" viewBox="0 0 80 80">
+                    <circle cx="40" cy="40" r="32" stroke={COLORS.border} strokeWidth="7" fill="none" />
+                    <circle
+                      cx="40"
+                      cy="40"
+                      r="32"
+                      stroke={UNIT_META[selectedTopic.unit].color}
+                      strokeWidth="7"
+                      fill="none"
+                      strokeLinecap="round"
+                      strokeDasharray={2 * Math.PI * 32}
+                      strokeDashoffset={(1 - selectedTopic.p_known) * 2 * Math.PI * 32}
+                      transform="rotate(-90 40 40)"
+                    />
+                    <text x="40" y="44" textAnchor="middle" fill={COLORS.textPrimary} fontSize="14" fontWeight="700">
+                      {Math.round(selectedTopic.p_known * 100)}%
+                    </text>
+                  </svg>
+                  <div>
+                    <div style={{ color: UNIT_META[selectedTopic.unit].color, fontSize: 12, fontWeight: 600, marginBottom: 4 }}>{getStateLabel(selectedTopic.state)}</div>
+                    <div style={{ color: COLORS.textSecondary, fontSize: 12 }}>p_known: {selectedTopic.p_known.toFixed(2)}</div>
+                  </div>
+                </div>
+              </div>
+
+              {selectedTopic.session_count > 0 && (
+                <div style={{ marginBottom: 18, border: `1px solid ${COLORS.border}`, borderRadius: 10, background: COLORS.surfaceRaised, padding: 12 }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 6, color: COLORS.primary, fontSize: 13, fontWeight: 600, marginBottom: 8 }}>
+                    <span className="material-symbols-outlined" style={materialIconStyle(16, "#8b8b9e")}>psychology</span>
+                    Memory Palace
+                  </div>
+                  {selectedTopic.understanding_summary && (
+                    <div style={{ color: COLORS.textSecondary, fontSize: 13, fontStyle: "italic", lineHeight: 1.6, marginBottom: 8 }}>{selectedTopic.understanding_summary}</div>
+                  )}
+                  <div style={{ color: COLORS.textSecondary, fontSize: 12, marginBottom: 4 }}>Sessions studied: {selectedTopic.session_count}</div>
+                  <div style={{ color: COLORS.textSecondary, fontSize: 12, marginBottom: 4 }}>Last studied: {relativeTime(selectedTopic.last_studied_at)}</div>
+                  {selectedTopic.misconceptions_count > 0 && (
+                    <div style={{ color: COLORS.success, fontSize: 12 }}>Corrected {selectedTopic.misconceptions_count} misconceptions</div>
+                  )}
+                </div>
+              )}
+
+              <div style={{ marginBottom: 18 }}>
+                <div style={{ color: COLORS.textSecondary, fontSize: 12, marginBottom: 8 }}>Prerequisites</div>
+                {selectedTopic.prerequisites.length === 0 ? (
+                  <div style={{ color: COLORS.textMuted, fontSize: 12 }}>None</div>
+                ) : (
+                  selectedTopic.prerequisites.map((pid) => {
+                    const pTopic = topics[pid];
+                    const p = pTopic?.p_known ?? 0;
+                    const color = p > 0.7 ? COLORS.success : p >= 0.4 ? COLORS.warning : COLORS.border;
+                    const symbol = p > 0.7 ? "check_circle" : "circle";
+                    return (
+                      <button
+                        key={pid}
+                        onClick={() => {
+                          setSelectedTopicId(pid);
+                          setHoveredTopicId(pid);
+                        }}
+                        style={{
+                          width: "100%",
+                          display: "flex",
+                          alignItems: "center",
+                          gap: 8,
+                          background: "transparent",
+                          border: "none",
+                          padding: "6px 0",
+                          color: COLORS.textSecondary,
+                          textAlign: "left",
+                          cursor: "pointer",
+                          minHeight: isMobile ? 44 : "auto",
+                        }}
+                      >
+                        <span className="material-symbols-outlined" style={materialIconStyle(14, color)}>{symbol}</span>
+                        <span style={{ fontSize: 12 }}>{pTopic ? getTopicLabel(pTopic.id) : getTopicLabel(pid)}</span>
+                      </button>
+                    );
+                  })
+                )}
+              </div>
+
+              <div style={{ marginBottom: 18 }}>
+                <div style={{ color: COLORS.textSecondary, fontSize: 12, marginBottom: 8 }}>Subtopics</div>
+                <ul style={{ paddingLeft: 16, margin: 0 }}>
+                  {selectedTopic.subtopics.map((item) => (
+                    <li key={item} style={{ color: COLORS.textSecondary, fontSize: 12, marginBottom: 4 }}>{item}</li>
+                  ))}
+                </ul>
+              </div>
+            </div>
+
+            <div style={{ position: "absolute", left: 0, right: 0, bottom: 0, padding: isMobile ? "12px 14px calc(12px + env(safe-area-inset-bottom))" : 14, borderTop: `1px solid ${COLORS.border}`, background: "#0d0d14" }}>
+              {!canStartLearning ? (
+                <button
+                  disabled
+                  style={{
+                    width: "100%",
+                    border: "none",
+                    borderRadius: 8,
+                    background: COLORS.border,
+                    color: COLORS.textMuted,
+                    padding: isMobile ? "12px" : "11px 12px",
+                    minHeight: isMobile ? 44 : "auto",
+                    cursor: "not-allowed",
+                    fontWeight: 600,
+                  }}
+                >
+                  Complete prerequisites first
+                </button>
+              ) : (
+                <>
+                  <button
+                    onClick={() => router.push(`/business-analytics?prompt=${encodeURIComponent(`Let me learn about ${selectedTopic.name}`)}`)}
+                    style={{
+                      width: "100%",
+                      border: "none",
+                      borderRadius: 8,
+                      background: COLORS.primary,
+                      color: "#fff",
+                      padding: isMobile ? "12px" : "11px 12px",
+                      minHeight: isMobile ? 44 : "auto",
+                      cursor: "pointer",
+                      fontWeight: 600,
+                      marginBottom: showTestMyself ? 8 : 0,
+                    }}
+                  >
+                    {selectedTopic.state === "intermediate" || selectedTopic.state === "advanced" ? "Continue Learning →" : "Start Learning →"}
+                  </button>
+
+                  {showTestMyself && (
+                    <button
+                      onClick={() => router.push(`/business-analytics?mcq=${encodeURIComponent(selectedTopic.name)}`)}
+                      style={{
+                        width: "100%",
+                        border: `1px solid ${COLORS.primary}`,
+                        borderRadius: 8,
+                        background: "transparent",
+                        color: COLORS.primary,
+                        padding: isMobile ? "12px" : "11px 12px",
+                        minHeight: isMobile ? 44 : "auto",
+                        cursor: "pointer",
+                        fontWeight: 600,
+                      }}
+                    >
+                      Test Myself →
+                    </button>
+                  )}
+                </>
+              )}
+            </div>
+          </>
+        )}
+      </div>
+    </div>
   );
 }
