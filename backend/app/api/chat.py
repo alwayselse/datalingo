@@ -9,11 +9,6 @@ try:
 except Exception:
     google_genai = None
     google_genai_types = None
-
-try:
-    import google.generativeai as legacy_genai
-except Exception:
-    legacy_genai = None
 from app.core.db import get_pg_pool
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
 from fastapi.responses import StreamingResponse
@@ -427,8 +422,10 @@ async def stream_ba_response_gemini(prompt: str, system: str) -> AsyncGenerator[
                 yield text
         return
 
-    if legacy_genai is None:
-        raise RuntimeError("No compatible Gemini SDK found. Install google-genai or google-generativeai.")
+    try:
+        import google.generativeai as legacy_genai
+    except Exception as exc:
+        raise RuntimeError("No compatible Gemini SDK found. Install google-genai or google-generativeai.") from exc
 
     legacy_genai.configure(api_key=api_key)
     model = legacy_genai.GenerativeModel(
