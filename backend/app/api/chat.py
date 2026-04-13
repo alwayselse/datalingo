@@ -3,12 +3,18 @@ import json
 import os
 import re
 import threading
+try:
+    from google import genai as google_genai
+    from google.genai import types as google_genai_types
+except Exception:
+    google_genai = None
+    google_genai_types = None
 from app.core.db import get_pg_pool
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
 from fastapi.responses import StreamingResponse
 from psycopg2.extras import RealDictCursor
 from pydantic import BaseModel
-from typing import Optional, List
+from typing import Optional, List, AsyncGenerator
 from qdrant_client import models as qmodels
 
 from app.models.schemas import ChatRequest
@@ -39,6 +45,8 @@ from app.services.context_engine import (
     build_followup_prompt,
 )
 from app.services.embeddings import get_embedding
+from app.services.ba_dream_agent import process_dream_queue
+from app.services.ba_memory_service import queue_dream_job
 
 router = APIRouter(prefix="/chat", tags=["chat"])
 
@@ -264,6 +272,29 @@ def _get_session_memory(session_id: str, db) -> dict:
     return session_memory if isinstance(session_memory, dict) else {}
 
 
+def _get_last_messages_text(session_id: str, db, limit: int = 5) -> str:
+    with db.cursor(cursor_factory=RealDictCursor) as cur:
+        cur.execute(
+            """
+            SELECT role, content
+            FROM chat_messages
+            WHERE session_id = %s::uuid
+            ORDER BY created_at DESC
+            LIMIT %s
+            """,
+            (session_id, limit),
+        )
+        rows = cur.fetchall() or []
+
+    rows = list(reversed(rows))
+    lines = []
+    for row in rows:
+        role = str(row.get("role") or "").lower().strip()
+        speaker = "Student" if role == "user" else "AI"
+        lines.append(f"{speaker}: {row.get('content') or ''}")
+    return "\n".join(lines)
+
+
 def _extract_doc_mode(message: str):
     targeted_match = re.search(r"\[DOC_ONLY:([^\]]+)\]", message)
     doc_only_match = re.search(r"\[DOC_ONLY\]", message)
@@ -369,10 +400,59 @@ def retrieve_chunks(message: str, user_id: str, session_id: str, db):
     course_chunks = _normalize_qdrant_hits(course_results, "Course material", "course")
     return course_chunks, "normal", False
 
+
+async def stream_ba_response_gemini(prompt: str, system: str) -> AsyncGenerator[str, None]:
+    api_key = os.environ["GEMINI_API_KEY"]
+    model_name = os.environ.get("GEMINI_MODEL", "gemini-3.1-flash-lite-preview")
+
+    if google_genai is not None and google_genai_types is not None:
+        client = google_genai.Client(api_key=api_key)
+        response = client.models.generate_content_stream(
+            model=model_name,
+            contents=prompt,
+            config=google_genai_types.GenerateContentConfig(
+                system_instruction=system,
+                temperature=0.7,
+                max_output_tokens=2048,
+            ),
+        )
+        for chunk in response:
+            text = getattr(chunk, "text", None)
+            if text:
+                yield text
+        return
+
+    try:
+        import google.generativeai as legacy_genai
+    except Exception as exc:
+        raise RuntimeError("No compatible Gemini SDK found. Install google-genai or google-generativeai.") from exc
+
+    legacy_genai.configure(api_key=api_key)
+    model = legacy_genai.GenerativeModel(
+        model_name=model_name,
+        system_instruction=system,
+    )
+    response = model.generate_content(
+        prompt,
+        stream=True,
+        generation_config=legacy_genai.types.GenerationConfig(
+            temperature=0.7,
+            max_output_tokens=2048,
+        ),
+    )
+    for chunk in response:
+        if chunk.text:
+            yield chunk.text
+
 # ── Main chat endpoint ────────────────────────────────────────────────────────
 
 @router.post("/")
-def chat(body: ChatRequest, user=Depends(get_current_user), db=Depends(get_db)):
+def chat(
+    body: ChatRequest,
+    background_tasks: BackgroundTasks,
+    user=Depends(get_current_user),
+    db=Depends(get_db),
+):
     user_id    = str(user["id"])
     session_id = body.session_id or str(uuid.uuid4())
     clean_message = _clean_doc_prefix(body.message)
@@ -432,7 +512,7 @@ def chat(body: ChatRequest, user=Depends(get_current_user), db=Depends(get_db)):
 
     full_response = []
 
-    def generate():
+    async def generate():
         # Always send session_id as first event (CORS-safe fallback)
         yield _sse(json.dumps({"session_id": session_id}))
 
@@ -440,9 +520,14 @@ def chat(body: ChatRequest, user=Depends(get_current_user), db=Depends(get_db)):
         if msg_count >= LONG_CHAT_THRESHOLD:
             yield _sse(json.dumps({"long_chat_warning": True, "message_count": msg_count}))
 
-        for token in stream_response(clean_message, system_prompt, history, user_id=user_id):
-            full_response.append(token)
-            yield _sse(json.dumps({"token": token}))
+        if (user.get("course") or "") == "business_analytics":
+            async for token in stream_ba_response_gemini(clean_message, system_prompt):
+                full_response.append(token)
+                yield _sse(json.dumps({"token": token}))
+        else:
+            for token in stream_response(clean_message, system_prompt, history, user_id=user_id):
+                full_response.append(token)
+                yield _sse(json.dumps({"token": token}))
 
         complete = "".join(full_response)
         missing  = check_formats_used(complete, formats)
@@ -463,6 +548,18 @@ def chat(body: ChatRequest, user=Depends(get_current_user), db=Depends(get_db)):
         # Save assistant message
         final = "".join(full_response)
         _save_message(session_id, user_id, "assistant", final, sources, db)
+
+        if (user.get("course") or "") == "business_analytics":
+            detected_topics = [topic_id] if topic_id else []
+            last_5_messages_text = _get_last_messages_text(session_id, db, limit=5)
+            background_tasks.add_task(
+                queue_dream_job,
+                user_id=user_id,
+                session_id=session_id,
+                topics_touched=detected_topics,
+                raw_summary=last_5_messages_text,
+            )
+            background_tasks.add_task(process_dream_queue)
 
     headers = {
         "X-Session-ID":    session_id,
