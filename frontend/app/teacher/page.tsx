@@ -65,6 +65,88 @@ interface StudentDetail {
   recent_questions: { question: string; session_title: string; asked_at: string }[];
 }
 
+interface BAOverview {
+  total_students: number;
+  active_last_7_days: number;
+  total_messages: number;
+  inactive_students: number;
+  most_studied_topic: string | null;
+  weakest_topic: string | null;
+  total_memory_fragments: number;
+  topic_activity: Array<{
+    topic_id: string;
+    student_count: number;
+    avg_p_known: number;
+    total_sessions: number;
+  }>;
+  dream_health: Record<string, number>;
+}
+
+interface BAStudent {
+  user_id: string;
+  username: string;
+  email: string;
+  name: string;
+  total_sessions: number;
+  total_messages: number;
+  palace_sessions: number;
+  avg_palace_mastery: number;
+  topics_studied: number;
+  topics_with_memory: number;
+  last_active: string | null;
+}
+
+interface BAStudentDetail {
+  student: {
+    id: string;
+    username: string;
+    email: string;
+    name: string;
+    created_at: string;
+  };
+  palace: Array<{
+    topic_id: string;
+    topic_name: string;
+    p_known: number;
+    mastery_level: string;
+    session_count: number;
+    understanding_summary: string | null;
+    misconceptions: any[];
+    forge_attempts: any[];
+    last_studied_at: string | null;
+  }>;
+  fragments: Array<{
+    topic_id: string;
+    fragment_type: string;
+    content: string;
+    created_at: string;
+  }>;
+  recent_sessions: Array<{
+    id: string;
+    title: string;
+    created_at: string;
+    message_count: number;
+  }>;
+  weak_topics: any[];
+  summary: {
+    topics_studied: number;
+    topics_with_memory: number;
+    total_fragments: number;
+    avg_mastery: number;
+  };
+}
+
+interface Announcement {
+  id: string;
+  teacher_id: string;
+  title: string;
+  body: string;
+  course: string;
+  created_at: string;
+  is_active: boolean;
+  teacher_name: string;
+}
+
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
 function fmtDate(iso: string | null) {
@@ -84,6 +166,37 @@ function masteryLabel(p: number) {
   if (p < 0.4) return { text: "Beginner", color: "#7c3aed" };
   if (p < 0.7) return { text: "Intermediate", color: "#3b82f6" };
   return { text: "Advanced", color: "#10b981" };
+}
+
+function fmtAgo(iso: string | null) {
+  if (!iso) return "just now";
+  const diff = Date.now() - new Date(iso).getTime();
+  const mins = Math.floor(diff / 60000);
+  if (mins < 1) return "just now";
+  if (mins < 60) return `${mins}m ago`;
+  const hrs = Math.floor(mins / 60);
+  if (hrs < 24) return `${hrs}h ago`;
+  const days = Math.floor(hrs / 24);
+  return `${days}d ago`;
+}
+
+function shortTopicLabel(topic: string | null | undefined) {
+  const clean = (topic || "Unknown topic").replace(/_/g, " ");
+  return clean.length > 34 ? `${clean.slice(0, 34)}...` : clean;
+}
+
+function topicCoverageColor(count: number) {
+  if (count > 15) return "#10b981";
+  if (count >= 8) return "#d97706";
+  return "#ef4444";
+}
+
+function fragmentTypeColor(kind: string) {
+  if (kind === "insight") return "#10b981";
+  if (kind === "confusion") return "#d97706";
+  if (kind === "example_worked") return "#3b82f6";
+  if (kind === "forge_attempt") return "#7c3aed";
+  return "#494456";
 }
 
 // ── Radar Chart (SVG) ─────────────────────────────────────────────────────────
@@ -194,7 +307,7 @@ function StatCard({ icon, label, value, sub }: { icon: string; label: string; va
   );
 }
 
-type Tab = "overview" | "students" | "at-risk";
+type Tab = "overview" | "students" | "at-risk" | "ba";
 
 // ── Main Teacher Page ─────────────────────────────────────────────────────────
 
@@ -221,6 +334,17 @@ export default function TeacherPage() {
   const [summary, setSummary] = useState<string | null>(null);
   const [summaryLoading, setSummaryLoading] = useState(false);
   const [summaryOpen, setSummaryOpen] = useState(false);
+  const [baOverview, setBAOverview] = useState<BAOverview | null>(null);
+  const [baStudents, setBAStudents] = useState<BAStudent[]>([]);
+  const [baStudent, setBAStudent] = useState<BAStudentDetail | null>(null);
+  const [baPanelOpen, setBAPanelOpen] = useState(false);
+  const [baPanelLoading, setBAPanelLoading] = useState(false);
+  const [announcements, setAnnouncements] = useState<Announcement[]>([]);
+  const [annTitle, setAnnTitle] = useState("");
+  const [annBody, setAnnBody] = useState("");
+  const [annPosting, setAnnPosting] = useState(false);
+  const [baLoading, setBALoading] = useState(false);
+  const [baSummaryOpen, setBASummaryOpen] = useState<Record<string, boolean>>({});
 
   const API = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
   const headers = { Authorization: `Bearer ${token}` };
@@ -257,8 +381,78 @@ export default function TeacherPage() {
     if (res.ok) setAtRisk(await res.json());
   }, [token]);
 
+  const fetchBA = useCallback(async () => {
+    if (!token) return;
+    setBALoading(true);
+    try {
+      const [ovRes, stuRes, annRes] = await Promise.all([
+        fetch(`${API}/analytics/ba/overview`, { headers }),
+        fetch(`${API}/analytics/ba/students`, { headers }),
+        fetch(`${API}/analytics/announcements?course=business_analytics`, { headers }),
+      ]);
+      if (ovRes.ok) setBAOverview(await ovRes.json());
+      if (stuRes.ok) setBAStudents(await stuRes.json());
+      if (annRes.ok) {
+        const rows = await annRes.json();
+        setAnnouncements(Array.isArray(rows) ? rows.filter((a: Announcement) => a.is_active) : []);
+      }
+    } finally {
+      setBALoading(false);
+    }
+  }, [token]);
+
+  const openBAStudent = async (userId: string) => {
+    setBAPanelOpen(true);
+    setBAPanelLoading(true);
+    setBAStudent(null);
+    setBASummaryOpen({});
+    try {
+      const res = await fetch(
+        `${API}/analytics/ba/student/${userId}`,
+        { headers }
+      );
+      if (res.ok) setBAStudent(await res.json());
+    } finally {
+      setBAPanelLoading(false);
+    }
+  };
+
+  const postAnnouncement = async () => {
+    if (!annTitle.trim() || !annBody.trim()) return;
+    setAnnPosting(true);
+    try {
+      const res = await fetch(`${API}/analytics/announcements`, {
+        method: "POST",
+        headers: { ...headers, "Content-Type": "application/json" },
+        body: JSON.stringify({
+          title: annTitle,
+          body: annBody,
+          course: "business_analytics"
+        })
+      });
+      if (res.ok) {
+        setAnnTitle("");
+        setAnnBody("");
+        await fetchBA();
+      }
+    } finally {
+      setAnnPosting(false);
+    }
+  };
+
+  const deleteAnnouncement = async (id: string) => {
+    await fetch(`${API}/analytics/announcements/${id}`, {
+      method: "DELETE",
+      headers
+    });
+    setAnnouncements(prev => prev.filter(a => a.id !== id));
+  };
+
   useEffect(() => { fetchOverview(); fetchStudents(); fetchAtRisk(); }, [fetchOverview, fetchStudents, fetchAtRisk]);
   useEffect(() => { fetchStudents(); }, [search, batch, sortBy]);
+  useEffect(() => {
+    if (activeTab === "ba") fetchBA();
+  }, [activeTab, fetchBA]);
 
   const openStudentPanel = async (userId: string) => {
     setPanelOpen(true);
@@ -362,6 +556,7 @@ export default function TeacherPage() {
                   { icon: "dashboard", tab: "overview" },
                   { icon: "group", tab: "students" },
                   { icon: "warning", tab: "at-risk" },
+                  { icon: "analytics", tab: "ba" },
                 ].map(item => (
                   <button key={item.tab} onClick={() => setActiveTab(item.tab as Tab)}
                     title={item.tab}
@@ -378,6 +573,7 @@ export default function TeacherPage() {
                 <NavItem icon="dashboard" label="Overview" active={activeTab === "overview"} onClick={() => setActiveTab("overview")} />
                 <NavItem icon="group" label="Students" active={activeTab === "students"} onClick={() => setActiveTab("students")} />
                 <NavItem icon="warning" label="At-Risk Students" active={activeTab === "at-risk"} onClick={() => setActiveTab("at-risk")} />
+                <NavItem icon="analytics" label="BA Analytics" active={activeTab === "ba"} onClick={() => setActiveTab("ba")} />
               </>
             )}
           </nav>
@@ -414,11 +610,13 @@ export default function TeacherPage() {
               {activeTab === "overview" && "Class Overview"}
               {activeTab === "students" && "Students"}
               {activeTab === "at-risk" && "At-Risk Students"}
+              {activeTab === "ba" && "BA Analytics"}
             </h1>
             <p style={{ fontSize: 12, color: "#494456", margin: 0, fontWeight: 600 }}>
               {activeTab === "overview" && "Class-wide performance and topic mastery heatmap"}
               {activeTab === "students" && "Search, filter and review individual student progress"}
               {activeTab === "at-risk" && "Students flagged for low engagement or mastery"}
+              {activeTab === "ba" && "Business Analytics class insights and memory system health"}
             </p>
           </div>
 
@@ -535,6 +733,168 @@ export default function TeacherPage() {
             </div>
           )}
 
+          {/* ── BA TAB ── */}
+          {activeTab === "ba" && (
+            <div className="fade-up" style={{ display: "flex", flexDirection: "column", gap: 24 }}>
+              {/* BA Overview */}
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(5, 1fr)", gap: 16 }}>
+                <StatCard icon="group" label="BA Students" value={baOverview?.total_students ?? "—"} />
+                <StatCard icon="bolt" label="Active 7 Days" value={baOverview?.active_last_7_days ?? "—"} />
+                <StatCard icon="chat" label="Total Messages" value={baOverview?.total_messages?.toLocaleString() ?? "—"} />
+                <StatCard icon="psychology" label="Memory Fragments" value={baOverview?.total_memory_fragments?.toLocaleString() ?? "—"} />
+                <StatCard icon="warning" label="No Activity" value={baOverview?.inactive_students ?? "—"} sub="students never started" />
+              </div>
+
+              <div style={{ background: "#1a1a1a", borderRadius: 16, padding: "20px 24px", border: "1px solid rgba(73,68,86,0.1)" }}>
+                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 14 }}>
+                  <h3 style={{ fontSize: 15, fontWeight: 700, margin: 0, color: "#e2e2e2" }}>Topic Coverage Across BA Cohort</h3>
+                  {baLoading && <span style={{ fontSize: 11, color: "#494456" }}>Refreshing…</span>}
+                </div>
+                <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+                  {[...(baOverview?.topic_activity || [])]
+                    .sort((a, b) => b.total_sessions - a.total_sessions)
+                    .slice(0, 12)
+                    .map((topic) => {
+                      const total = Math.max(1, baOverview?.total_students || 1);
+                      const pct = Math.min(100, (topic.student_count / total) * 100);
+                      const tint = masteryColor(Number(topic.avg_p_known || 0));
+                      return (
+                        <div key={topic.topic_id}>
+                          <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 6 }}>
+                            <span style={{ minWidth: 220, fontSize: 12, color: "#cbc3d9", fontWeight: 600 }}>{shortTopicLabel(topic.topic_id)}</span>
+                            <span style={{ fontSize: 10, fontWeight: 700, color: "#cfbdff", background: "rgba(110,40,245,0.1)", border: "1px solid rgba(110,40,245,0.25)", borderRadius: 999, padding: "2px 8px" }}>
+                              {topic.student_count} students
+                            </span>
+                            <span style={{ marginLeft: "auto", fontSize: 10, color: "#494456" }}>{Math.round(Number(topic.avg_p_known || 0) * 100)}% mastery</span>
+                          </div>
+                          <div style={{ height: 7, borderRadius: 4, background: "#1f1f1f", overflow: "hidden" }}>
+                            <div style={{ height: "100%", width: `${pct}%`, background: tint, borderRadius: 4, transition: "width 0.35s ease" }} />
+                          </div>
+                        </div>
+                      );
+                    })}
+                  {(baOverview?.topic_activity?.length || 0) === 0 && (
+                    <p style={{ margin: 0, fontSize: 12, color: "#494456" }}>No BA topic activity yet.</p>
+                  )}
+                </div>
+
+                <div style={{ marginTop: 16, paddingTop: 12, borderTop: "1px solid rgba(73,68,86,0.12)", display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+                  <span style={{ fontSize: 11, color: "#cbc3d9", fontWeight: 700 }}>Memory System</span>
+                  <span style={{ fontSize: 10, fontWeight: 700, color: "#10b981", background: "rgba(16,185,129,0.12)", borderRadius: 999, padding: "3px 8px" }}>done={baOverview?.dream_health?.done || 0}</span>
+                  <span style={{ fontSize: 10, fontWeight: 700, color: "#d97706", background: "rgba(217,119,6,0.12)", borderRadius: 999, padding: "3px 8px" }}>pending={baOverview?.dream_health?.pending || 0}</span>
+                  <span style={{ fontSize: 10, fontWeight: 700, color: "#ef4444", background: "rgba(239,68,68,0.12)", borderRadius: 999, padding: "3px 8px" }}>failed={baOverview?.dream_health?.failed || 0}</span>
+                </div>
+              </div>
+
+              {/* BA Students */}
+              <div style={{ background: "#1a1a1a", borderRadius: 16, border: "1px solid rgba(73,68,86,0.1)", overflow: "hidden" }}>
+                <div style={{ padding: "18px 20px 10px" }}>
+                  <h3 style={{ fontSize: 15, fontWeight: 700, margin: 0, color: "#e2e2e2" }}>BA Students</h3>
+                </div>
+                <div style={{ overflowX: "auto" }}>
+                  <table>
+                    <thead><tr>
+                      <th>Student</th><th>Topics Studied</th><th>Avg Mastery</th><th>Sessions</th><th>Memory</th><th>Last Active</th>
+                    </tr></thead>
+                    <tbody>
+                      {baStudents.map(s => {
+                        const mastery = Number(s.avg_palace_mastery || 0);
+                        const topicsColor = topicCoverageColor(s.topics_studied);
+                        return (
+                          <tr key={s.user_id} onClick={() => openBAStudent(s.user_id)}>
+                            <td>
+                              <div>
+                                <p style={{ margin: 0, fontWeight: 600, color: "#e2e2e2" }}>{s.username}</p>
+                                <p style={{ margin: 0, fontSize: 11, color: "#494456" }}>{s.name || s.email}</p>
+                              </div>
+                            </td>
+                            <td>
+                              <span style={{ fontSize: 12, fontWeight: 700, color: topicsColor }}>{s.topics_studied}/23</span>
+                            </td>
+                            <td>
+                              <span style={{ fontSize: 11, fontWeight: 700, color: masteryLabel(mastery).color, background: masteryColor(mastery, 0.16), border: `1px solid ${masteryColor(mastery, 0.4)}`, borderRadius: 999, padding: "3px 10px" }}>
+                                {Math.round(mastery * 100)}%
+                              </span>
+                            </td>
+                            <td>{s.total_sessions}</td>
+                            <td>
+                              <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                                {s.topics_with_memory > 0 && <span className="material-symbols-outlined" style={{ fontSize: 14, color: "#10b981", fontVariationSettings: "'FILL' 1" }}>psychology</span>}
+                                <span>{s.topics_with_memory} topics memorized</span>
+                              </div>
+                            </td>
+                            <td style={{ color: "#494456" }}>{fmtDate(s.last_active)}</td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                  {baStudents.length === 0 && !baLoading && (
+                    <div style={{ padding: 40, textAlign: "center", color: "#333", fontSize: 13 }}>No BA students found</div>
+                  )}
+                </div>
+              </div>
+
+              {/* Announcements */}
+              <div style={{ background: "#1a1a1a", borderRadius: 16, border: "1px solid rgba(73,68,86,0.1)", padding: "20px 22px" }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 14 }}>
+                  <span className="material-symbols-outlined" style={{ fontSize: 18, color: "#cfbdff", fontVariationSettings: "'FILL' 1" }}>campaign</span>
+                  <h3 style={{ fontSize: 15, fontWeight: 700, margin: 0, color: "#e2e2e2" }}>Class Announcements</h3>
+                </div>
+
+                <div style={{ display: "flex", flexDirection: "column", gap: 10, marginBottom: 14 }}>
+                  <input
+                    value={annTitle}
+                    onChange={e => setAnnTitle(e.target.value)}
+                    placeholder="Announcement title"
+                    style={{ width: "100%", padding: "10px 12px", background: "#131313", border: "1px solid rgba(73,68,86,0.2)", borderRadius: 10, color: "#e2e2e2", fontFamily: "Manrope, sans-serif", fontSize: 13, outline: "none" }}
+                  />
+                  <textarea
+                    value={annBody}
+                    onChange={e => setAnnBody(e.target.value)}
+                    rows={3}
+                    placeholder="Message to all BA students..."
+                    style={{ width: "100%", padding: "10px 12px", background: "#131313", border: "1px solid rgba(73,68,86,0.2)", borderRadius: 10, color: "#e2e2e2", fontFamily: "Manrope, sans-serif", fontSize: 13, outline: "none", resize: "vertical" }}
+                  />
+                  <button
+                    onClick={postAnnouncement}
+                    disabled={annPosting}
+                    style={{ alignSelf: "flex-start", padding: "10px 14px", borderRadius: 10, border: "none", background: annPosting ? "#1f1f1f" : "linear-gradient(135deg, #6e28f5, #3d1a8f)", color: annPosting ? "#494456" : "white", fontFamily: "inherit", fontSize: 12, fontWeight: 700, cursor: annPosting ? "not-allowed" : "pointer" }}
+                  >
+                    {annPosting ? "Posting..." : "Post to BA Class"}
+                  </button>
+                </div>
+
+                <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+                  {announcements.map((ann) => {
+                    const canDelete = ann.teacher_id === String((user as any)?.id || "");
+                    return (
+                      <div key={ann.id} style={{ background: "#131313", border: "1px solid rgba(73,68,86,0.12)", borderRadius: 12, padding: "12px 14px" }}>
+                        <p style={{ margin: "0 0 6px", color: "#fff", fontWeight: 600, fontSize: 14 }}>{ann.title}</p>
+                        <p style={{ margin: 0, color: "#cbc3d9", fontSize: 13, lineHeight: 1.6 }}>{ann.body}</p>
+                        <div style={{ marginTop: 8, display: "flex", alignItems: "center", gap: 8 }}>
+                          <span style={{ fontSize: 11, color: "#494456" }}>{ann.teacher_name} · {fmtDate(ann.created_at)}</span>
+                          {canDelete && (
+                            <button
+                              onClick={() => deleteAnnouncement(ann.id)}
+                              style={{ marginLeft: "auto", border: "none", background: "transparent", color: "#ef4444", cursor: "pointer", display: "flex", alignItems: "center", gap: 4, fontSize: 11, fontWeight: 700 }}
+                            >
+                              <span className="material-symbols-outlined" style={{ fontSize: 14 }}>delete</span>
+                              Delete
+                            </button>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })}
+                  {announcements.length === 0 && (
+                    <p style={{ margin: "4px 0 0", fontSize: 12, color: "#494456" }}>No announcements yet</p>
+                  )}
+                </div>
+              </div>
+            </div>
+          )}
+
           {/* ── AT-RISK TAB ── */}
           {activeTab === "at-risk" && (
             <div className="fade-up">
@@ -583,6 +943,152 @@ export default function TeacherPage() {
             </div>
           )}
         </main>
+
+        {/* ── BA Student Detail Panel ── */}
+        {baPanelOpen && (
+          <div style={{ position: "fixed", top: 0, right: 0, bottom: 0, width: 440, background: "rgba(10,10,14,0.96)", backdropFilter: "blur(20px)", borderLeft: "1px solid rgba(110,40,245,0.15)", zIndex: 51, display: "flex", flexDirection: "column", animation: "slideIn 0.3s cubic-bezier(0.16,1,0.3,1) forwards", overflowY: "auto" }}>
+            <div style={{ padding: "18px 20px", borderBottom: "1px solid rgba(255,255,255,0.05)", display: "flex", alignItems: "center", justifyContent: "space-between", position: "sticky", top: 0, background: "rgba(10,10,14,0.96)", backdropFilter: "blur(20px)", zIndex: 1 }}>
+              <div>
+                {baStudent && (
+                  <>
+                    <h2 style={{ fontSize: 18, fontWeight: 800, color: "#e2e2e2", margin: "0 0 3px" }}>{baStudent.student.name || baStudent.student.username}</h2>
+                    <p style={{ fontSize: 11, color: "#494456", margin: 0 }}>@{baStudent.student.username}</p>
+                    <p style={{ fontSize: 11, color: "#494456", margin: "2px 0 0" }}>{baStudent.student.email}</p>
+                  </>
+                )}
+                {baPanelLoading && <p style={{ fontSize: 14, color: "#494456", margin: 0 }}>Loading…</p>}
+              </div>
+              <button
+                onClick={() => { setBAPanelOpen(false); setBAStudent(null); }}
+                style={{ background: "none", border: "none", cursor: "pointer", color: "#494456", padding: 4 }}
+                onMouseEnter={e => e.currentTarget.style.color = "#e2e2e2"}
+                onMouseLeave={e => e.currentTarget.style.color = "#494456"}
+              >
+                <span className="material-symbols-outlined" style={{ fontSize: 20 }}>close</span>
+              </button>
+            </div>
+
+            {baStudent && !baPanelLoading && (
+              <div style={{ padding: "18px 20px", display: "flex", flexDirection: "column", gap: 18 }}>
+                <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                  <span style={{ fontSize: 11, fontWeight: 700, color: "#cfbdff", background: "rgba(110,40,245,0.12)", borderRadius: 999, padding: "4px 10px" }}>{baStudent.summary.topics_studied} topics studied</span>
+                  <span style={{ fontSize: 11, fontWeight: 700, color: "#10b981", background: "rgba(16,185,129,0.12)", borderRadius: 999, padding: "4px 10px" }}>{baStudent.summary.total_fragments} memory fragments</span>
+                  <span style={{ fontSize: 11, fontWeight: 700, color: masteryLabel(baStudent.summary.avg_mastery).color, background: masteryColor(baStudent.summary.avg_mastery, 0.16), borderRadius: 999, padding: "4px 10px" }}>{Math.round(baStudent.summary.avg_mastery * 100)}% avg mastery</span>
+                </div>
+
+                <div>
+                  <h3 style={{ fontSize: 13, fontWeight: 700, color: "#cbc3d9", margin: "0 0 10px", display: "flex", alignItems: "center", gap: 6, textTransform: "uppercase", letterSpacing: "0.08em" }}>
+                    <span className="material-symbols-outlined" style={{ fontSize: 16, color: "#7c3aed", fontVariationSettings: "'FILL' 1" }}>psychology</span>
+                    Memory Palace
+                  </h3>
+                  <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+                    {[...baStudent.palace]
+                      .filter(p => p.session_count > 0)
+                      .sort((a, b) => Number(b.p_known || 0) - Number(a.p_known || 0))
+                      .map((p) => {
+                        const mastery = Number(p.p_known || 0);
+                        const mid = `${p.topic_id}`;
+                        const misconceptions = Array.isArray(p.misconceptions) ? p.misconceptions.length : 0;
+                        const forgeAttempts = Array.isArray(p.forge_attempts) ? p.forge_attempts.length : 0;
+                        return (
+                          <div key={mid} style={{ background: "#131313", borderRadius: 12, padding: "12px 12px", border: "1px solid rgba(73,68,86,0.1)" }}>
+                            <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}>
+                              <p style={{ margin: 0, fontSize: 12, color: "#e2e2e2", fontWeight: 700 }}>{shortTopicLabel(p.topic_name || p.topic_id)}</p>
+                              <span style={{ marginLeft: "auto", fontSize: 10, fontWeight: 700, color: masteryLabel(mastery).color, background: masteryColor(mastery, 0.15), borderRadius: 999, padding: "3px 8px" }}>{Math.round(mastery * 100)}%</span>
+                            </div>
+                            <div style={{ height: 6, background: "#1f1f1f", borderRadius: 3, overflow: "hidden", marginBottom: 6 }}>
+                              <div style={{ height: "100%", width: `${mastery * 100}%`, background: masteryColor(mastery), borderRadius: 3 }} />
+                            </div>
+                            <p style={{ margin: "0 0 8px", fontSize: 11, color: "#494456" }}>studied {p.session_count}x</p>
+
+                            {p.understanding_summary && (
+                              <div style={{ marginBottom: 8 }}>
+                                <button
+                                  onClick={() => setBASummaryOpen(prev => ({ ...prev, [mid]: !prev[mid] }))}
+                                  style={{ border: "none", background: "transparent", padding: 0, cursor: "pointer", color: "#cfbdff", fontSize: 11, fontWeight: 700 }}
+                                >
+                                  {baSummaryOpen[mid] ? "Hide summary" : "Show summary"}
+                                </button>
+                                {baSummaryOpen[mid] && (
+                                  <p style={{ margin: "6px 0 0", fontSize: 12, color: "#cbc3d9", fontStyle: "italic", lineHeight: 1.55 }}>{p.understanding_summary}</p>
+                                )}
+                              </div>
+                            )}
+
+                            <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+                              {misconceptions > 0 && (
+                                <span style={{ fontSize: 10, fontWeight: 700, color: "#10b981", background: "rgba(16,185,129,0.12)", borderRadius: 999, padding: "3px 8px" }}>{misconceptions} misconceptions corrected</span>
+                              )}
+                              {forgeAttempts > 0 && (
+                                <span style={{ fontSize: 10, fontWeight: 700, color: "#7c3aed", background: "rgba(124,58,237,0.12)", borderRadius: 999, padding: "3px 8px" }}>{forgeAttempts} forge attempts</span>
+                              )}
+                            </div>
+                          </div>
+                        );
+                      })}
+                  </div>
+                </div>
+
+                {baStudent.weak_topics.length > 0 && (
+                  <div>
+                    <h3 style={{ fontSize: 13, fontWeight: 700, color: "#d97706", margin: "0 0 10px", display: "flex", alignItems: "center", gap: 6, textTransform: "uppercase", letterSpacing: "0.08em" }}>
+                      <span className="material-symbols-outlined" style={{ fontSize: 16, color: "#d97706", fontVariationSettings: "'FILL' 1" }}>warning</span>
+                      Needs Attention
+                    </h3>
+                    <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                      {baStudent.weak_topics.map((topic: any) => {
+                        const p = Number(topic.p_known || 0);
+                        return (
+                          <div key={topic.topic_id} style={{ background: "#131313", border: "1px solid rgba(239,68,68,0.15)", borderRadius: 10, padding: "10px 12px" }}>
+                            <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 5 }}>
+                              <span style={{ fontSize: 12, color: "#cbc3d9", fontWeight: 600 }}>{shortTopicLabel(topic.topic_name || topic.topic_id)}</span>
+                              <span style={{ fontSize: 11, color: p < 0.25 ? "#ef4444" : "#d97706", fontWeight: 700 }}>{Math.round(p * 100)}%</span>
+                            </div>
+                            <div style={{ height: 5, background: "#1f1f1f", borderRadius: 3, overflow: "hidden" }}>
+                              <div style={{ height: "100%", width: `${p * 100}%`, background: p < 0.25 ? "#ef4444" : "#d97706", borderRadius: 3 }} />
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
+
+                <div>
+                  <h3 style={{ fontSize: 13, fontWeight: 700, color: "#cbc3d9", margin: "0 0 10px", textTransform: "uppercase", letterSpacing: "0.08em" }}>Recent Memory Fragments</h3>
+                  <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                    {baStudent.fragments.slice(0, 5).map((f, idx) => (
+                      <div key={`${f.topic_id}-${idx}`} style={{ background: "#131313", borderRadius: 10, padding: "10px 12px", border: "1px solid rgba(73,68,86,0.08)" }}>
+                        <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 6 }}>
+                          <span style={{ fontSize: 10, fontWeight: 700, color: fragmentTypeColor(f.fragment_type), background: `${fragmentTypeColor(f.fragment_type)}1f`, borderRadius: 999, padding: "2px 8px" }}>{f.fragment_type}</span>
+                        </div>
+                        <p style={{ margin: "0 0 6px", fontSize: 12, color: "#cbc3d9", lineHeight: 1.5, overflow: "hidden", display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical" as const }}>{f.content}</p>
+                        <p style={{ margin: 0, fontSize: 10, color: "#494456" }}>{shortTopicLabel(f.topic_id)} · {fmtAgo(f.created_at)}</p>
+                      </div>
+                    ))}
+                    {baStudent.fragments.length === 0 && <p style={{ margin: 0, fontSize: 12, color: "#494456" }}>No memory fragments yet.</p>}
+                  </div>
+                </div>
+
+                <div>
+                  <h3 style={{ fontSize: 13, fontWeight: 700, color: "#cbc3d9", margin: "0 0 10px", textTransform: "uppercase", letterSpacing: "0.08em" }}>Recent Sessions</h3>
+                  <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                    {baStudent.recent_sessions.map((s) => (
+                      <div key={s.id} style={{ background: "#131313", borderRadius: 10, border: "1px solid rgba(73,68,86,0.08)", padding: "10px 12px", display: "flex", justifyContent: "space-between", gap: 10 }}>
+                        <div>
+                          <p style={{ margin: "0 0 2px", fontSize: 12, color: "#e2e2e2", fontWeight: 600 }}>{s.title || "Untitled session"}</p>
+                          <p style={{ margin: 0, fontSize: 10, color: "#494456" }}>{fmtDate(s.created_at)}</p>
+                        </div>
+                        <span style={{ fontSize: 10, color: "#cbc3d9", whiteSpace: "nowrap" }}>{s.message_count} messages</span>
+                      </div>
+                    ))}
+                    {baStudent.recent_sessions.length === 0 && <p style={{ margin: 0, fontSize: 12, color: "#494456" }}>No recent sessions.</p>}
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
+        )}
 
         {/* ── Student Detail Panel ── */}
         {panelOpen && (

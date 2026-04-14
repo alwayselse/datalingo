@@ -1330,6 +1330,7 @@ export default function BusinessAnalyticsPage() {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [formulaCardIndex, setFormulaCardIndex] = useState(0);
   const [recentSessions, setRecentSessions] = useState<RecentSession[]>([]);
+  const [announcements, setAnnouncements] = useState<Array<{ id: string; title: string; body: string; teacher_name: string; created_at: string }>>([]);
   const [pendingDeleteSessionId, setPendingDeleteSessionId] = useState<string | null>(null);
   const [deletingSessionId, setDeletingSessionId] = useState<string | null>(null);
   const [toolPanelWidth, setToolPanelWidth] = useState(380);
@@ -1524,6 +1525,25 @@ export default function BusinessAnalyticsPage() {
     }
   }, [API, token]);
 
+  const fetchAnnouncements = useCallback(async () => {
+    if (!token) {
+      setAnnouncements([]);
+      return;
+    }
+    try {
+      const res = await fetch(
+        `${API}/analytics/announcements?course=business_analytics`,
+        { headers: { Authorization: `Bearer ${token}` } }
+      );
+      if (res.ok) {
+        const data = await res.json();
+        setAnnouncements(Array.isArray(data) ? data.filter((a: any) => a.is_active) : []);
+      }
+    } catch {
+      setAnnouncements([]);
+    }
+  }, [API, token]);
+
   const loadSessionMessages = useCallback(async (sid: string) => {
     if (!token || !sid) return;
     try {
@@ -1608,14 +1628,14 @@ export default function BusinessAnalyticsPage() {
     const boot = async () => {
       await new Promise((r) => setTimeout(r, 50));
       if (!alive) return;
-      await fetchRecentSessions();
+      await Promise.all([fetchRecentSessions(), fetchAnnouncements()]);
     };
 
     boot();
     return () => {
       alive = false;
     };
-  }, [mounted, token, router, fetchRecentSessions]);
+  }, [mounted, token, router, fetchRecentSessions, fetchAnnouncements]);
 
   const adjustTextareaHeight = useCallback(() => {
     if (!textareaRef.current) return;
@@ -2811,6 +2831,38 @@ export default function BusinessAnalyticsPage() {
           <div ref={messageScrollRef} style={{ flex: 1, overflowY: "auto", padding: isMobile ? "16px" : isTablet ? "20px 24px" : "24px 40px", paddingBottom: isMobile ? 180 : 130 }}>
             {messages.length === 0 ? (
               <div style={{ paddingTop: isMobile ? 30 : 80, paddingBottom: 60 }}>
+                {announcements.length > 0 && messages.length === 0 && (
+                  <div style={{ marginBottom: 20 }}>
+                    {announcements.slice(0, 2).map(ann => (
+                      <div key={ann.id} style={{
+                        background: "rgba(124,58,237,0.08)",
+                        border: "1px solid rgba(124,58,237,0.2)",
+                        borderLeft: "3px solid #7c3aed",
+                        borderRadius: "0 10px 10px 0",
+                        padding: "12px 16px",
+                        marginBottom: 8,
+                      }}>
+                        <div style={{
+                          fontSize: 12, fontWeight: 700,
+                          color: "#7c3aed", marginBottom: 4
+                        }}>
+                          📢 {ann.title}
+                        </div>
+                        <div style={{
+                          fontSize: 13, color: "#c0c0d0", lineHeight: 1.6
+                        }}>
+                          {ann.body}
+                        </div>
+                        <div style={{
+                          marginTop: 6, fontSize: 11, color: "#4a4a5e"
+                        }}>
+                          {ann.teacher_name} · {new Date(ann.created_at)
+                            .toLocaleDateString([], { day: "2-digit", month: "short" })}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
                 {uploadedDoc && (
                   <div style={{ background: "#7c3aed11", border: "1px solid #7c3aed33", borderRadius: 10, padding: "12px 16px", marginBottom: 16, display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10 }}>
                     <div style={{ display: "flex", alignItems: "center", gap: 10, minWidth: 0 }}>
