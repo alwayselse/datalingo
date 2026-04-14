@@ -49,12 +49,13 @@ def _embed_text(text: str) -> list[float]:
         return []
     resp = requests.post(
         f"{EMBEDDING_SERVICE_URL}/embed",
-        json={"text": text},
+        json={"texts": [text]},
         timeout=60,
     )
     resp.raise_for_status()
     payload = resp.json() if resp.content else {}
-    embedding = payload.get("embedding") if isinstance(payload, dict) else None
+    vectors = payload.get("vectors") or payload.get("embedding") if isinstance(payload, dict) else None
+    embedding = vectors[0] if isinstance(vectors, list) and len(vectors) > 0 and isinstance(vectors[0], list) else vectors
     if not isinstance(embedding, list):
         return []
     return embedding
