@@ -58,10 +58,15 @@ async def rag_agent(
         async with httpx.AsyncClient(timeout=10.0) as client:
             embed_resp = await client.post(
                 os.environ.get("EMBEDDING_SERVICE_URL", "http://127.0.0.1:8001") + "/embed",
-                json={"text": query},
+                json={"texts": [query]},
             )
             embed_resp.raise_for_status()
-            embedding = (embed_resp.json() or {}).get("embedding") or []
+            resp_data = embed_resp.json() or {}
+            vectors = resp_data.get("vectors") or resp_data.get("embedding")
+            if isinstance(vectors, list) and len(vectors) > 0:
+                embedding = vectors[0] if isinstance(vectors[0], list) else vectors
+            else:
+                embedding = []
 
         if not embedding:
             return {"chunks": [], "has_doc_hits": False}
