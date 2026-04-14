@@ -28,7 +28,7 @@ CREATE TABLE IF NOT EXISTS ba_memory_fragments (
     -- values: 'insight' | 'confusion' | 'example_worked' |
     --         'forge_attempt' | 'case_connection' | 'formula_used'
     content TEXT NOT NULL,
-    source_session_id INTEGER REFERENCES chat_sessions(id),
+    source_session_id VARCHAR,
     metadata JSONB DEFAULT '{}',
     vector_id VARCHAR,
     embedded_at TIMESTAMP,
@@ -39,7 +39,7 @@ CREATE TABLE IF NOT EXISTS ba_memory_fragments (
 CREATE TABLE IF NOT EXISTS ba_dream_queue (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     user_id VARCHAR NOT NULL,
-    session_id INTEGER NOT NULL,
+    session_id VARCHAR NOT NULL,
     status VARCHAR DEFAULT 'pending',
     -- values: 'pending' | 'processing' | 'done' | 'failed'
     topics_touched JSONB DEFAULT '[]',

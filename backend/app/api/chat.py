@@ -45,8 +45,6 @@ from app.services.context_engine import (
     build_followup_prompt,
 )
 from app.services.embeddings import get_embedding
-from app.services.ba_dream_agent import process_dream_queue
-from app.services.ba_memory_service import queue_dream_job
 
 router = APIRouter(prefix="/chat", tags=["chat"])
 
@@ -468,47 +466,57 @@ def chat(
     # Get message count AFTER saving — used for banner signal
     msg_count = get_message_count_for_session(session_id, db)
 
-    topic_id  = classify_topic(clean_message, user_id=user_id)
-    chunks, retrieval_mode, has_uploaded_hits = retrieve_chunks(body.message, user_id, session_id, db)
+    topic_id = classify_topic(clean_message, user_id=user_id)
+    is_ba_student = (user.get("course") or "") == "business_analytics"
 
-    DEFINITION_TRIGGERS = ("what is", "define", "what are", "who is", "meaning of", "what does")
-    VISUAL_TRIGGERS = ("diagram", "flowchart", "visualize", "show me", "draw", "chart", "map out", "step by step visually", "explain with a diagram", "pipeline", "architecture")
-    is_definition = any(clean_message.lower().strip().startswith(t) for t in DEFINITION_TRIGGERS)
-    is_short = len(clean_message.split()) < 8
-    is_visual_request = any(t in clean_message.lower() for t in VISUAL_TRIGGERS)
+    chunks = []
+    retrieval_mode = "normal"
+    has_uploaded_hits = False
+    formats = {k: False for k in ["needs_math", "needs_code", "needs_flowchart", "needs_steps", "needs_analogy"]}
+    system_prompt = ""
+    history = []
 
-    if (is_definition or is_short) and not is_visual_request:
-        formats = {k: False for k in ["needs_math", "needs_code", "needs_flowchart", "needs_steps", "needs_analogy"]}
-    else:
-        formats = detect_formats(clean_message, user_id=user_id)
+    if not is_ba_student:
+        chunks, retrieval_mode, has_uploaded_hits = retrieve_chunks(body.message, user_id, session_id, db)
 
-    format_instructions = build_format_instructions(formats)
+        DEFINITION_TRIGGERS = ("what is", "define", "what are", "who is", "meaning of", "what does")
+        VISUAL_TRIGGERS = ("diagram", "flowchart", "visualize", "show me", "draw", "chart", "map out", "step by step visually", "explain with a diagram", "pipeline", "architecture")
+        is_definition = any(clean_message.lower().strip().startswith(t) for t in DEFINITION_TRIGGERS)
+        is_short = len(clean_message.split()) < 8
+        is_visual_request = any(t in clean_message.lower() for t in VISUAL_TRIGGERS)
 
-    system_prompt, history = build_prompt(
-        user_id=user_id,
-        session_id=session_id,
-        current_topic_id=topic_id,
-        chunks=chunks,
-        db=db,
-        format_instructions=format_instructions
-    )
+        if (is_definition or is_short) and not is_visual_request:
+            formats = {k: False for k in ["needs_math", "needs_code", "needs_flowchart", "needs_steps", "needs_analogy"]}
+        else:
+            formats = detect_formats(clean_message, user_id=user_id)
 
-    if retrieval_mode == "no_doc":
-        system_prompt += (
-            "\n\nSYSTEM NOTE: The student used /doc but no matching document was found. "
-            "Tell them to use /doc [filename_hint] [question], for example: "
-            "/doc ikea what is their supply chain strategy?"
+        format_instructions = build_format_instructions(formats)
+
+        system_prompt, history = build_prompt(
+            user_id=user_id,
+            session_id=session_id,
+            current_topic_id=topic_id,
+            chunks=chunks,
+            db=db,
+            format_instructions=format_instructions,
         )
-    elif retrieval_mode in ("doc_only", "doc_targeted"):
-        system_prompt += (
-            "\n\nSYSTEM NOTE: Answer using ONLY the provided document excerpts. Do not use "
-            "general knowledge. If the answer is not in the document, say so."
-        )
-    elif retrieval_mode == "normal" and has_uploaded_hits:
-        system_prompt += (
-            "\n\nSYSTEM NOTE: The following excerpts include the student's own uploaded notes. "
-            "Prioritize these over course material when relevant."
-        )
+
+        if retrieval_mode == "no_doc":
+            system_prompt += (
+                "\n\nSYSTEM NOTE: The student used /doc but no matching document was found. "
+                "Tell them to use /doc [filename_hint] [question], for example: "
+                "/doc ikea what is their supply chain strategy?"
+            )
+        elif retrieval_mode in ("doc_only", "doc_targeted"):
+            system_prompt += (
+                "\n\nSYSTEM NOTE: Answer using ONLY the provided document excerpts. Do not use "
+                "general knowledge. If the answer is not in the document, say so."
+            )
+        elif retrieval_mode == "normal" and has_uploaded_hits:
+            system_prompt += (
+                "\n\nSYSTEM NOTE: The following excerpts include the student's own uploaded notes. "
+                "Prioritize these over course material when relevant."
+            )
 
     full_response = []
 
@@ -520,10 +528,51 @@ def chat(
         if msg_count >= LONG_CHAT_THRESHOLD:
             yield _sse(json.dumps({"long_chat_warning": True, "message_count": msg_count}))
 
-        if (user.get("course") or "") == "business_analytics":
-            async for token in stream_ba_response_gemini(clean_message, system_prompt):
+        if is_ba_student:
+            from app.services.ba_orchestrator import run_ba_pipeline
+
+            session_msgs = []
+            try:
+                with db.cursor(cursor_factory=RealDictCursor) as cur:
+                    cur.execute(
+                        """
+                        SELECT role, content
+                        FROM chat_messages
+                        WHERE session_id = %s::uuid
+                        ORDER BY created_at DESC
+                        LIMIT 10
+                        """,
+                        (session_id,),
+                    )
+                    rows = cur.fetchall() or []
+                    session_msgs = list(
+                        reversed([
+                            {"role": row.get("role"), "content": row.get("content")}
+                            for row in rows
+                        ])
+                    )
+            except Exception:
+                session_msgs = []
+
+            async for token in run_ba_pipeline(
+                message=body.message,
+                user_id=user_id,
+                user_name=user.get("name") or user.get("username") or "Student",
+                session_id=session_id,
+                session_messages=session_msgs,
+                topic_id=topic_id,
+            ):
+                if token.startswith("[TOOL_SIGNAL]"):
+                    yield f"data: {token}\n\n"
+                    continue
+
                 full_response.append(token)
-                yield _sse(json.dumps({"token": token}))
+                yield f"data: {token}\n\n"
+
+            final = "".join(full_response)
+            _save_message(session_id, user_id, "assistant", final, [], db)
+            yield "data: [DONE]\n\n"
+            return
         else:
             for token in stream_response(clean_message, system_prompt, history, user_id=user_id):
                 full_response.append(token)
@@ -548,18 +597,6 @@ def chat(
         # Save assistant message
         final = "".join(full_response)
         _save_message(session_id, user_id, "assistant", final, sources, db)
-
-        if (user.get("course") or "") == "business_analytics":
-            detected_topics = [topic_id] if topic_id else []
-            last_5_messages_text = _get_last_messages_text(session_id, db, limit=5)
-            background_tasks.add_task(
-                queue_dream_job,
-                user_id=user_id,
-                session_id=session_id,
-                topics_touched=detected_topics,
-                raw_summary=last_5_messages_text,
-            )
-            background_tasks.add_task(process_dream_queue)
 
     headers = {
         "X-Session-ID":    session_id,

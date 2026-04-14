@@ -211,11 +211,7 @@ def write_fragment(
             palace_id = palace_row["id"]
             p_known_at_time = float(palace_row.get("p_known") or 0.0)
 
-            session_id_value = None
-            try:
-                session_id_value = int(session_id)
-            except Exception:
-                session_id_value = None
+            session_id_value = str(session_id) if session_id else None
 
             cur.execute(
                 """
@@ -334,13 +330,7 @@ def queue_dream_job(
     pool = get_pg_pool()
     conn = pool.getconn()
 
-    session_id_value = None
-    try:
-        session_id_value = int(session_id)
-    except Exception:
-        print(f"[BA Memory] queue_dream_job skipped: non-integer session_id={session_id}")
-        pool.putconn(conn)
-        return ""
+    session_id_value = str(session_id) if session_id else None
 
     try:
         with conn.cursor(cursor_factory=RealDictCursor) as cur:

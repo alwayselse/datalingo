@@ -293,6 +293,65 @@ def get_my_student_detail(
     return _build_student_detail_payload(str(user["id"]), db)
 
 
+@router.get("/ba/palace")
+def get_ba_palace(
+    current_user=Depends(get_current_user),
+    db=Depends(get_db),
+):
+    if (current_user.get("course") or "") != "business_analytics":
+        raise HTTPException(status_code=403, detail="BA course only")
+
+    with db.cursor(cursor_factory=RealDictCursor) as cur:
+        cur.execute(
+            """
+            SELECT
+                bmp.topic_id,
+                t.name as topic_name,
+                bmp.p_known,
+                bmp.mastery_level,
+                bmp.understanding_summary,
+                bmp.session_count,
+                bmp.last_studied_at,
+                bmp.misconceptions,
+                bmp.forge_attempts,
+                bmp.effective_examples,
+                bmp.updated_at
+            FROM ba_memory_palace bmp
+            LEFT JOIN topics t ON t.id = bmp.topic_id
+            WHERE bmp.user_id = %s::uuid
+            ORDER BY bmp.updated_at DESC
+            """,
+            (str(current_user["id"]),),
+        )
+        rows = cur.fetchall()
+
+    result = []
+    for row in rows:
+        misconceptions = row.get("misconceptions") or []
+        forge_attempts = row.get("forge_attempts") or []
+        result.append(
+            {
+                "topic_id": row["topic_id"],
+                "topic_name": row.get("topic_name"),
+                "p_known": float(row.get("p_known") or 0),
+                "mastery_level": row.get("mastery_level") or "unassessed",
+                "understanding_summary": row.get("understanding_summary"),
+                "session_count": row.get("session_count") or 0,
+                "last_studied_at": row["last_studied_at"].isoformat()
+                if row.get("last_studied_at")
+                else None,
+                "misconceptions_count": len(misconceptions)
+                if isinstance(misconceptions, list)
+                else 0,
+                "forge_attempts_count": len(forge_attempts)
+                if isinstance(forge_attempts, list)
+                else 0,
+            }
+        )
+
+    return {"rows": result, "total": len(result)}
+
+
 # ── 4. Topic heatmap ──────────────────────────────────────────────────────────
 
 @router.get("/topics")

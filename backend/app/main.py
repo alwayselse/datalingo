@@ -2,7 +2,7 @@ import traceback
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
-from app.api import auth, chat, documents, analytics, admin, ba_documents
+from app.api import auth, chat, documents, analytics, admin, ba_documents, ba_tools
 from app.core.db import get_pg_pool
 from app.core.config import ALLOW_ORIGINS
 from app.services.logger import log_error
@@ -50,6 +50,7 @@ app.include_router(auth.router)
 app.include_router(chat.router)
 app.include_router(documents.router)
 app.include_router(ba_documents.router)
+app.include_router(ba_tools.router, prefix="/ba/tools", tags=["ba-tools"])
 app.include_router(analytics.router)
 app.include_router(admin.router)
 

@@ -27,6 +27,12 @@ interface UploadedDoc {
   collection_id?: string;
 }
 
+interface ToolSignalData {
+  formula?: string;
+  company?: string;
+  [key: string]: unknown;
+}
+
 interface SlashCommand {
   cmd: string;
   description: string;
@@ -36,9 +42,47 @@ interface SlashCommand {
 
 interface ForgeResult {
   score: number;
-  feedback: string;
-  right: string[];
-  strengthen: string[];
+  overall: string;
+  what_you_got_right: string[];
+  what_to_strengthen: string[];
+  corrected_explanation: string;
+  error?: string;
+}
+
+interface ExamQuestionData {
+  question: string;
+  type?: string;
+  difficulty?: string;
+  hints?: string[];
+  rubric?: Array<{ criterion: string; points: number }>;
+  total_points?: number;
+}
+
+interface ExamResultData {
+  score: number;
+  grade: string;
+  overall_feedback: string;
+  rubric_breakdown: Array<{
+    criterion: string;
+    achieved: boolean;
+    feedback: string;
+  }>;
+  model_answer_hints: string[];
+  encourage: string;
+}
+
+interface BriefData {
+  topic: string;
+  read_time_minutes: number;
+  what_you_know: string[];
+  whats_coming: Array<{ concept: string; why_it_matters: string }>;
+  watch_out_for: Array<{ misconception: string; reality: string }>;
+  key_formula?: {
+    name?: string | null;
+    expression?: string;
+    plain_english?: string;
+  };
+  warm_up_question?: string;
 }
 
 interface CaseItem {
@@ -389,6 +433,8 @@ export default function BusinessAnalyticsPage() {
   const [isStreaming, setIsStreaming] = useState(false);
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [activeTool, setActiveTool] = useState<ToolKey | null>(null);
+  const [toolData, setToolData] = useState<ToolSignalData>({});
+  const [suggestedTool, setSuggestedTool] = useState<string | null>(null);
   const [showSlashMenu, setShowSlashMenu] = useState(false);
   const [slashFilter, setSlashFilter] = useState("");
   const [uploadedDoc, setUploadedDoc] = useState<UploadedDoc | null>(null);
@@ -408,16 +454,17 @@ export default function BusinessAnalyticsPage() {
   const [caseIndex, setCaseIndex] = useState(0);
 
   const [examTopic, setExamTopic] = useState(BA_TOPICS[0]);
-  const [examDifficulty, setExamDifficulty] = useState("Intermediate");
+  const [examDifficulty, setExamDifficulty] = useState("intermediate");
   const [examLoading, setExamLoading] = useState(false);
-  const [examQuestion, setExamQuestion] = useState("");
-  const [examRubric, setExamRubric] = useState<string[]>([]);
+  const [examQuestion, setExamQuestion] = useState<ExamQuestionData | null>(null);
   const [examAnswer, setExamAnswer] = useState("");
-  const [examScore, setExamScore] = useState<number | null>(null);
+  const [examResult, setExamResult] = useState<ExamResultData | null>(null);
+  const [examHintsOpen, setExamHintsOpen] = useState(false);
+  const [examModelHintsOpen, setExamModelHintsOpen] = useState(false);
 
   const [briefTopic, setBriefTopic] = useState(BA_TOPICS[0]);
   const [briefLoading, setBriefLoading] = useState(false);
-  const [briefReady, setBriefReady] = useState(false);
+  const [briefData, setBriefData] = useState<BriefData | null>(null);
 
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -499,6 +546,28 @@ export default function BusinessAnalyticsPage() {
     }
   }, [activeTool]);
 
+  useEffect(() => {
+    if (activeTool === "case") {
+      const company = String(toolData?.company || "").toLowerCase();
+      if (!company) return;
+      const idx = CASE_STUDIES.findIndex((item) => item.company.toLowerCase() === company);
+      if (idx >= 0) setCaseIndex(idx);
+    }
+
+    if (activeTool === "formula") {
+      const formula = String(toolData?.formula || "").toLowerCase();
+      const map: Record<string, number> = { rfm: 0, clv: 1, ped: 2, eoq: 3, churn: 4 };
+      const idx = map[formula];
+      if (idx === undefined) return;
+      setFormulaCardIndex(idx);
+      const el = formulaScrollRef.current;
+      if (el) {
+        const cardWidth = el.clientWidth + 12;
+        el.scrollTo({ left: cardWidth * idx, behavior: "smooth" });
+      }
+    }
+  }, [activeTool, toolData]);
+
   const fetchRecentSessions = useCallback(async () => {
     await new Promise((r) => setTimeout(r, 50));
     if (!token) {
@@ -566,6 +635,8 @@ export default function BusinessAnalyticsPage() {
     setMessages([]);
     setInput("");
     setActiveTool(null);
+    setToolData({});
+    setSuggestedTool(null);
     setUploadedDoc(null);
     sessionIdRef.current = null;
     setSessionId(null);
@@ -597,6 +668,15 @@ export default function BusinessAnalyticsPage() {
     if (!textareaRef.current) return;
     textareaRef.current.style.height = "auto";
     textareaRef.current.style.height = `${Math.min(textareaRef.current.scrollHeight, 120)}px`;
+  }, []);
+
+  const toTopicId = useCallback((topicLabel: string) => {
+    return topicLabel
+      .toLowerCase()
+      .replace(/&/g, " and ")
+      .replace(/\//g, " ")
+      .replace(/[^a-z0-9]+/g, "_")
+      .replace(/^_+|_+$/g, "");
   }, []);
 
   useEffect(() => {
@@ -658,7 +738,7 @@ export default function BusinessAnalyticsPage() {
       const decoder = new TextDecoder();
       let fullAccumulated = "";
       let displayed = "";
-      let wordQueue: string[] = [];
+      const wordQueue: string[] = [];
       let dripping = false;
       let done = false;
 
@@ -689,6 +769,22 @@ export default function BusinessAnalyticsPage() {
             break;
           }
 
+          if (raw.startsWith("[TOOL_SIGNAL]")) {
+            try {
+              const signal = JSON.parse(raw.slice(13));
+              if (signal.type === "tool_activate") {
+                setActiveTool(signal.tool as ToolKey);
+                setToolData(signal.tool_data || {});
+                setSuggestedTool(null);
+              } else if (signal.type === "tool_suggest") {
+                setSuggestedTool(signal.tool || null);
+              }
+            } catch {
+              // ignore malformed tool signals
+            }
+            continue;
+          }
+
           try {
             const parsed = JSON.parse(raw);
             if (parsed.session_id && !sessionIdRef.current) {
@@ -707,7 +803,11 @@ export default function BusinessAnalyticsPage() {
               setMessages((prev) => prev.map((m) => (m.id === assistantId ? { ...m, sources: parsed.sources } : m)));
             }
           } catch {
-            // skip malformed chunks
+            // BA orchestrator streams plain text tokens as raw SSE data.
+            fullAccumulated += raw;
+            const words = String(raw).split(/(?<=\s)|(?=\s)/).filter(Boolean);
+            wordQueue.push(...words);
+            if (!dripping) drip();
           }
         }
       }
@@ -747,26 +847,31 @@ export default function BusinessAnalyticsPage() {
     }
 
     if (lower === "/forge" || lower.startsWith("/forge ")) {
+      setSuggestedTool(null);
       setActiveTool("forge");
       return;
     }
 
     if (lower === "/formula" || lower.startsWith("/formula ")) {
+      setSuggestedTool(null);
       setActiveTool("formula");
       return;
     }
 
     if (lower === "/case" || lower.startsWith("/case ")) {
+      setSuggestedTool(null);
       setActiveTool("case");
       return;
     }
 
     if (lower === "/exam" || lower.startsWith("/exam ")) {
+      setSuggestedTool(null);
       setActiveTool("exam");
       return;
     }
 
     if (lower === "/brief" || lower.startsWith("/brief ")) {
+      setSuggestedTool(null);
       setActiveTool("brief");
       return;
     }
@@ -783,6 +888,7 @@ export default function BusinessAnalyticsPage() {
     }
 
     if (command.action === "tool" && command.tool) {
+      setSuggestedTool(null);
       setActiveTool(command.tool);
       setShowSlashMenu(false);
       setInput("");
@@ -878,64 +984,141 @@ export default function BusinessAnalyticsPage() {
   }, [uploadFile]);
 
   const runForgeEvaluation = useCallback(async () => {
-    if (!forgeExplanation.trim()) return;
-
+    if (!forgeExplanation.trim() || !forgeTopic || !token) return;
     setForgeLoading(true);
+    setForgeResult(null);
 
-    const payload = {
-      topic_id: forgeTopic,
-      explanation: forgeExplanation,
-      session_id: sessionIdRef.current,
-    };
+    try {
+      const res = await fetch(`${API}/ba/tools/forge`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          topic_id: toTopicId(forgeTopic),
+          explanation: forgeExplanation,
+          session_id: sessionIdRef.current || sessionId || "",
+        }),
+      });
 
-    console.log("[Concept Forge] Coming soon call payload", payload);
-
-    await new Promise((r) => setTimeout(r, 800));
-
-    setForgeResult({
-      score: Math.max(1, Math.min(10, Math.round((forgeExplanation.length / 90) * 2))),
-      feedback: "Concept Forge API is coming soon. For now this is a placeholder evaluation based on clarity and coverage.",
-      right: ["You attempted a structured explanation", "You connected the topic to business impact"],
-      strengthen: ["Include one concrete numeric example", "Explain assumptions and edge cases explicitly"],
-    });
-
-    setForgeLoading(false);
-  }, [forgeExplanation, forgeTopic]);
+      if (!res.ok) throw new Error("Evaluation failed");
+      const data = await res.json();
+      setForgeResult(data);
+    } catch {
+      setForgeResult({
+        score: 0,
+        overall: "",
+        what_you_got_right: [],
+        what_to_strengthen: [],
+        corrected_explanation: "",
+        error: "Failed to evaluate. Try again.",
+      });
+    } finally {
+      setForgeLoading(false);
+    }
+  }, [API, forgeExplanation, forgeTopic, sessionId, toTopicId, token]);
 
   const runExamGenerate = useCallback(async () => {
+    if (!token) return;
     setExamLoading(true);
-    setExamQuestion("");
-    setExamRubric([]);
+    setExamQuestion(null);
     setExamAnswer("");
-    setExamScore(null);
+    setExamResult(null);
+    setExamHintsOpen(false);
+    setExamModelHintsOpen(false);
 
-    await new Promise((r) => setTimeout(r, 900));
+    try {
+      const res = await fetch(`${API}/ba/tools/exam/generate`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          topic_id: toTopicId(examTopic),
+          difficulty: examDifficulty,
+          session_id: sessionIdRef.current || sessionId || "",
+        }),
+      });
 
-    setExamQuestion("A company's customer base dropped from 1,200 to 1,080 in Q3. Calculate the churn rate and suggest two retention strategies.");
-    setExamRubric([
-      "Correct churn calculation (10%)",
-      "Two valid strategies (20% each)",
-    ]);
-    setExamLoading(false);
-  }, []);
+      if (!res.ok) throw new Error("Question generation failed");
+      const data = await res.json();
+      setExamQuestion(data);
+    } catch {
+      setExamQuestion({
+        question: "Failed to generate question. Please try again.",
+        hints: [],
+        rubric: [],
+      });
+    } finally {
+      setExamLoading(false);
+    }
+  }, [API, examDifficulty, examTopic, sessionId, toTopicId, token]);
 
-  const submitExamAnswer = useCallback(() => {
-    if (!examAnswer.trim()) return;
-    const base = examAnswer.toLowerCase();
-    let score = 55;
-    if (base.includes("10")) score += 20;
-    if (base.includes("retention") || base.includes("loyalty")) score += 10;
-    if (base.includes("segment") || base.includes("personal")) score += 10;
-    setExamScore(Math.min(100, score));
-  }, [examAnswer]);
+  const submitExamAnswer = useCallback(async () => {
+    if (!token || !examAnswer.trim() || !examQuestion?.question) return;
+    setExamLoading(true);
+
+    try {
+      const res = await fetch(`${API}/ba/tools/exam/submit`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          topic_id: toTopicId(examTopic),
+          question: examQuestion.question,
+          answer: examAnswer,
+          session_id: sessionIdRef.current || sessionId || "",
+        }),
+      });
+
+      if (!res.ok) throw new Error("Exam submission failed");
+      const data = await res.json();
+      setExamResult(data);
+      setExamModelHintsOpen(false);
+    } catch {
+      setExamResult({
+        score: 0,
+        grade: "F",
+        overall_feedback: "Failed to submit answer. Please try again.",
+        rubric_breakdown: [],
+        model_answer_hints: [],
+        encourage: "",
+      });
+    } finally {
+      setExamLoading(false);
+    }
+  }, [API, examAnswer, examQuestion, examTopic, sessionId, toTopicId, token]);
 
   const runBrief = useCallback(async () => {
+    if (!token) return;
     setBriefLoading(true);
-    setBriefReady(false);
-    await new Promise((r) => setTimeout(r, 850));
-    setBriefReady(true);
-    setBriefLoading(false);
-  }, []);
+    setBriefData(null);
+    try {
+      const res = await fetch(`${API}/ba/tools/brief`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          topic_id: toTopicId(briefTopic),
+          session_id: sessionIdRef.current || sessionId || "",
+        }),
+      });
+
+      if (!res.ok) throw new Error("Brief generation failed");
+      const data = await res.json();
+      setBriefData(data);
+    } catch {
+      setBriefData(null);
+    } finally {
+      setBriefLoading(false);
+    }
+  }, [API, briefTopic, sessionId, toTopicId, token]);
 
   const formulaState = useMemo(() => {
     const r = 5;
@@ -1300,6 +1483,27 @@ export default function BusinessAnalyticsPage() {
           <div style={{ position: "absolute", left: 0, right: 0, bottom: isMobile ? 52 : 0, background: COLORS.bg, padding: isMobile ? `10px 12px calc(10px + env(safe-area-inset-bottom))` : "16px 24px", borderTop: `1px solid ${COLORS.border}`, zIndex: 60 }}>
             <input ref={fileInputRef} type="file" style={{ display: "none" }} accept=".pdf,.docx,.txt,.jpg,.jpeg,.png,.webp" onChange={handlePickFile} />
 
+            {suggestedTool && !activeTool && (
+              <div style={{ marginBottom: 10, background: "#1a1a24", border: "1px solid #2a2a3a", borderRadius: 8, padding: "8px 14px", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10 }}>
+                <button
+                  onClick={() => {
+                    setActiveTool(suggestedTool as ToolKey);
+                    setSuggestedTool(null);
+                  }}
+                  style={{ border: "none", background: "transparent", color: "#8b8b9e", fontSize: 12, cursor: "pointer", textAlign: "left", padding: 0 }}
+                >
+                  DataLingo suggests trying the {TOOL_LABELS[suggestedTool as ToolKey] || suggestedTool} tool -&gt;
+                </button>
+                <button
+                  onClick={() => setSuggestedTool(null)}
+                  style={{ border: "none", background: "transparent", color: "#8b8b9e", cursor: "pointer", padding: 0, width: 18, height: 18, display: "flex", alignItems: "center", justifyContent: "center" }}
+                  aria-label="Dismiss suggestion"
+                >
+                  x
+                </button>
+              </div>
+            )}
+
             <div style={{ position: "relative" }}>
               {showSlashMenu && input.startsWith("/") && (
                 <div style={{ position: "absolute", left: 0, right: 0, bottom: isMobile ? 68 : 74, background: COLORS.surfaceRaised, border: `1px solid ${COLORS.border}`, borderRadius: 10, overflow: "hidden", boxShadow: "0 8px 32px rgba(0,0,0,0.4)", maxHeight: isMobile ? 240 : 280, overflowY: "auto" }}>
@@ -1476,27 +1680,39 @@ export default function BusinessAnalyticsPage() {
 
                   {!forgeResult && !forgeLoading && (
                     <div style={{ marginTop: 12, background: COLORS.surface, border: `1px dashed ${COLORS.border}`, borderRadius: 10, padding: 12, color: COLORS.textSecondary, fontSize: 12 }}>
-                      Coming soon: backend scoring endpoint will be wired in Part 3.
+                      Submit your explanation to get a real score and targeted feedback.
                     </div>
                   )}
 
                   {forgeResult && (
                     <div style={{ marginTop: 14, border: `1px solid ${COLORS.border}`, borderRadius: 10, background: COLORS.surfaceRaised, padding: 12 }}>
-                      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 10 }}>
-                        <span style={{ fontSize: 12, color: COLORS.textSecondary }}>Score</span>
-                        <span style={{ fontSize: 13, fontWeight: 700, color: forgeResult.score <= 4 ? COLORS.error : forgeResult.score <= 7 ? COLORS.warning : COLORS.success }}>{forgeResult.score}/10</span>
-                      </div>
-                      <div style={{ color: COLORS.textPrimary, fontSize: 13, lineHeight: 1.6, marginBottom: 10 }}>{forgeResult.feedback}</div>
+                      {forgeResult.error ? (
+                        <div style={{ color: COLORS.error, fontSize: 13 }}>{forgeResult.error}</div>
+                      ) : (
+                        <>
+                          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 10 }}>
+                            <span style={{ fontSize: 12, color: COLORS.textSecondary }}>Score</span>
+                            <span style={{ fontSize: 13, fontWeight: 700, color: forgeResult.score <= 4 ? COLORS.error : forgeResult.score <= 7 ? COLORS.warning : COLORS.success }}>{forgeResult.score}/10</span>
+                          </div>
+                          <div style={{ color: COLORS.textPrimary, fontSize: 13, lineHeight: 1.6, marginBottom: 10 }}>{forgeResult.overall}</div>
 
-                      <div style={{ marginBottom: 8 }}>
-                        <div style={{ color: COLORS.success, fontSize: 12, fontWeight: 600, marginBottom: 4 }}>What you got right</div>
-                        {forgeResult.right.map((item) => <div key={item} style={{ color: COLORS.textSecondary, fontSize: 12, marginBottom: 2 }}>• {item}</div>)}
-                      </div>
+                          <div style={{ marginBottom: 8 }}>
+                            <div style={{ color: COLORS.success, fontSize: 12, fontWeight: 600, marginBottom: 4 }}>What you got right</div>
+                            {(forgeResult.what_you_got_right || []).map((item) => <div key={item} style={{ color: COLORS.textSecondary, fontSize: 12, marginBottom: 2 }}>• {item}</div>)}
+                          </div>
 
-                      <div style={{ marginBottom: 10 }}>
-                        <div style={{ color: COLORS.warning, fontSize: 12, fontWeight: 600, marginBottom: 4 }}>What to strengthen</div>
-                        {forgeResult.strengthen.map((item) => <div key={item} style={{ color: COLORS.textSecondary, fontSize: 12, marginBottom: 2 }}>• {item}</div>)}
-                      </div>
+                          <div style={{ marginBottom: 10 }}>
+                            <div style={{ color: COLORS.warning, fontSize: 12, fontWeight: 600, marginBottom: 4 }}>What to strengthen</div>
+                            {(forgeResult.what_to_strengthen || []).map((item) => <div key={item} style={{ color: COLORS.textSecondary, fontSize: 12, marginBottom: 2 }}>• {item}</div>)}
+                          </div>
+
+                          {!!forgeResult.corrected_explanation && (
+                            <div style={{ color: COLORS.textSecondary, fontSize: 12, fontStyle: "italic", marginBottom: 10 }}>
+                              {forgeResult.corrected_explanation}
+                            </div>
+                          )}
+                        </>
+                      )}
 
                       <button onClick={() => { setForgeResult(null); setForgeExplanation(""); }} style={{ border: `1px solid ${COLORS.border}`, background: COLORS.bg, color: COLORS.textPrimary, borderRadius: 8, padding: "8px 10px", cursor: "pointer", width: "100%" }}>Try again</button>
                     </div>
@@ -1684,12 +1900,12 @@ export default function BusinessAnalyticsPage() {
 
                   <label style={{ display: "block", fontSize: 12, color: COLORS.textSecondary, marginBottom: 6 }}>Difficulty</label>
                   <select value={examDifficulty} onChange={(e) => setExamDifficulty(e.target.value)} style={{ width: "100%", background: COLORS.surfaceRaised, border: `1px solid ${COLORS.border}`, color: COLORS.textPrimary, borderRadius: 8, padding: "8px 12px", marginBottom: 12 }}>
-                    <option>Beginner</option>
-                    <option>Intermediate</option>
-                    <option>Advanced</option>
+                    <option value="beginner">Beginner</option>
+                    <option value="intermediate">Intermediate</option>
+                    <option value="advanced">Advanced</option>
                   </select>
 
-                  <button onClick={runExamGenerate} style={{ width: "100%", background: COLORS.primary, color: "#fff", border: "none", borderRadius: 8, padding: 10, fontWeight: 600, cursor: "pointer", marginBottom: 12 }}>
+                  <button onClick={runExamGenerate} disabled={examLoading} style={{ width: "100%", background: COLORS.primary, color: "#fff", border: "none", borderRadius: 8, padding: 10, fontWeight: 600, cursor: examLoading ? "not-allowed" : "pointer", marginBottom: 12, opacity: examLoading ? 0.65 : 1 }}>
                     Generate Question
                   </button>
 
@@ -1697,22 +1913,84 @@ export default function BusinessAnalyticsPage() {
                     <div style={{ color: COLORS.textSecondary, fontSize: 12, marginBottom: 10 }}>Generating question...</div>
                   )}
 
-                  {!!examQuestion && (
+                  {!!examQuestion?.question && (
                     <div style={{ border: `1px solid ${COLORS.border}`, borderRadius: 10, background: COLORS.surfaceRaised, padding: 12, marginBottom: 12 }}>
-                      <div style={{ color: COLORS.textPrimary, fontSize: 13, lineHeight: 1.6, marginBottom: 10 }}>{examQuestion}</div>
-                      <div style={{ color: COLORS.textSecondary, fontSize: 12, marginBottom: 6 }}>Rubric</div>
-                      {examRubric.map((r) => <div key={r} style={{ color: COLORS.textSecondary, fontSize: 12, marginBottom: 3 }}>• {r}</div>)}
+                      <div style={{ color: COLORS.textPrimary, fontSize: 13, lineHeight: 1.6, marginBottom: 10 }}>{examQuestion.question}</div>
+
+                      {!!examQuestion.hints?.length && (
+                        <div style={{ marginBottom: 10 }}>
+                          <button onClick={() => setExamHintsOpen((v) => !v)} style={{ border: "none", background: "transparent", color: COLORS.primary, cursor: "pointer", padding: 0, fontSize: 12, fontWeight: 600 }}>
+                            {examHintsOpen ? "Hide hints" : "Show hints"}
+                          </button>
+                          {examHintsOpen && (
+                            <div style={{ marginTop: 6 }}>
+                              {(examQuestion.hints || []).map((h) => <div key={h} style={{ color: COLORS.textSecondary, fontSize: 12, marginBottom: 3 }}>• {h}</div>)}
+                            </div>
+                          )}
+                        </div>
+                      )}
+
+                      {!!examQuestion.rubric?.length && (
+                        <div style={{ marginBottom: 10 }}>
+                          <div style={{ color: COLORS.textSecondary, fontSize: 12, marginBottom: 6 }}>Rubric preview</div>
+                          {(examQuestion.rubric || []).map((r, idx) => (
+                            <div key={`${r.criterion}-${idx}`} style={{ color: COLORS.textSecondary, fontSize: 12, marginBottom: 3 }}>
+                              • {r.criterion} ({r.points} pts)
+                            </div>
+                          ))}
+                        </div>
+                      )}
 
                       <textarea value={examAnswer} onChange={(e) => setExamAnswer(e.target.value)} placeholder="Write your answer..." style={{ width: "100%", minHeight: 100, marginTop: 10, resize: "vertical", background: COLORS.bg, border: `1px solid ${COLORS.border}`, borderRadius: 8, color: COLORS.textPrimary, padding: "8px 10px", lineHeight: 1.6 }} />
 
-                      <button onClick={submitExamAnswer} style={{ width: "100%", marginTop: 8, background: COLORS.primary, color: "#fff", border: "none", borderRadius: 8, padding: 10, cursor: "pointer" }}>Submit Answer</button>
+                      <button onClick={submitExamAnswer} disabled={examLoading || !examAnswer.trim()} style={{ width: "100%", marginTop: 8, background: COLORS.primary, color: "#fff", border: "none", borderRadius: 8, padding: 10, cursor: examLoading || !examAnswer.trim() ? "not-allowed" : "pointer", opacity: examLoading || !examAnswer.trim() ? 0.65 : 1 }}>
+                        {examLoading ? "Submitting..." : "Submit Answer"}
+                      </button>
 
-                      {examScore !== null && (
+                      {examResult && (
                         <div style={{ marginTop: 10, border: `1px solid ${COLORS.border}`, borderRadius: 8, padding: 10, background: COLORS.bg }}>
-                          <div style={{ fontSize: 12, color: COLORS.textSecondary, marginBottom: 6 }}>Result</div>
-                          <div style={{ fontSize: 20, fontWeight: 700, color: examScore >= 75 ? COLORS.success : examScore >= 50 ? COLORS.warning : COLORS.error }}>{examScore}/100</div>
-                          {examRubric.map((r) => <div key={`${r}-res`} style={{ color: COLORS.textSecondary, fontSize: 12, marginTop: 4 }}>• {r}</div>)}
-                          <button onClick={() => { setExamQuestion(""); setExamRubric([]); setExamAnswer(""); setExamScore(null); }} style={{ marginTop: 10, width: "100%", border: `1px solid ${COLORS.border}`, background: COLORS.surfaceRaised, color: COLORS.textPrimary, borderRadius: 8, padding: "8px 10px", cursor: "pointer" }}>Next Question</button>
+                          <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 10 }}>
+                            <div style={{ width: 62, height: 62, borderRadius: "50%", border: `2px solid ${examResult.grade === "A" || examResult.grade === "B" ? COLORS.success : examResult.grade === "C" ? COLORS.warning : COLORS.error}`, color: examResult.grade === "A" || examResult.grade === "B" ? COLORS.success : examResult.grade === "C" ? COLORS.warning : COLORS.error, display: "flex", alignItems: "center", justifyContent: "center", fontWeight: 700, fontSize: 14 }}>
+                              {examResult.score}
+                            </div>
+                            <div>
+                              <div style={{ fontSize: 12, color: COLORS.textSecondary }}>Grade</div>
+                              <div style={{ fontSize: 16, fontWeight: 700, color: COLORS.textPrimary }}>{examResult.grade}</div>
+                            </div>
+                          </div>
+
+                          <div style={{ color: COLORS.textPrimary, fontSize: 12, lineHeight: 1.6, marginBottom: 8 }}>
+                            {examResult.overall_feedback}
+                          </div>
+
+                          {!!examResult.rubric_breakdown?.length && (
+                            <div style={{ marginBottom: 8 }}>
+                              {(examResult.rubric_breakdown || []).map((r, idx) => (
+                                <div key={`${r.criterion}-${idx}`} style={{ color: COLORS.textSecondary, fontSize: 12, marginBottom: 4 }}>
+                                  {r.achieved ? "✓" : "✕"} {r.criterion} - {r.feedback}
+                                </div>
+                              ))}
+                            </div>
+                          )}
+
+                          {!!examResult.model_answer_hints?.length && (
+                            <div style={{ marginBottom: 8 }}>
+                              <button onClick={() => setExamModelHintsOpen((v) => !v)} style={{ border: "none", background: "transparent", color: COLORS.primary, cursor: "pointer", padding: 0, fontSize: 12, fontWeight: 600 }}>
+                                {examModelHintsOpen ? "Hide model answer hints" : "Show model answer hints"}
+                              </button>
+                              {examModelHintsOpen && (
+                                <div style={{ marginTop: 6 }}>
+                                  {(examResult.model_answer_hints || []).map((hint) => (
+                                    <div key={hint} style={{ color: COLORS.textSecondary, fontSize: 12, marginBottom: 3 }}>• {hint}</div>
+                                  ))}
+                                </div>
+                              )}
+                            </div>
+                          )}
+
+                          {!!examResult.encourage && <div style={{ color: COLORS.success, fontSize: 12, marginBottom: 8 }}>{examResult.encourage}</div>}
+
+                          <button onClick={() => { setExamQuestion(null); setExamAnswer(""); setExamResult(null); setExamHintsOpen(false); setExamModelHintsOpen(false); }} style={{ marginTop: 10, width: "100%", border: `1px solid ${COLORS.border}`, background: COLORS.surfaceRaised, color: COLORS.textPrimary, borderRadius: 8, padding: "8px 10px", cursor: "pointer" }}>Next Question</button>
                         </div>
                       )}
                     </div>
@@ -1735,24 +2013,42 @@ export default function BusinessAnalyticsPage() {
                     <div style={{ color: COLORS.textSecondary, fontSize: 12 }}>Generating brief...</div>
                   )}
 
-                  {briefReady && (
+                  {briefData && (
                     <div style={{ border: `1px solid ${COLORS.border}`, borderRadius: 10, overflow: "hidden", background: COLORS.surfaceRaised }}>
+                      <div style={{ padding: 12, borderBottom: `1px solid ${COLORS.border}`, background: COLORS.surface }}>
+                        <span style={{ fontSize: 11, color: COLORS.textSecondary, border: `1px solid ${COLORS.border}`, borderRadius: 999, padding: "4px 8px" }}>
+                          ~{briefData.read_time_minutes || 5} min prep
+                        </span>
+                      </div>
                       <div style={{ padding: 12, borderBottom: `1px solid ${COLORS.border}`, background: "rgba(5,150,105,0.12)" }}>
                         <div style={{ color: COLORS.success, fontSize: 12, fontWeight: 600, marginBottom: 4 }}>What you already know</div>
-                        <div style={{ color: COLORS.textPrimary, fontSize: 12, lineHeight: 1.6 }}>You understand baseline metrics and can interpret simple dashboard trends.</div>
+                        {(briefData.what_you_know || []).map((item) => <div key={item} style={{ color: COLORS.textPrimary, fontSize: 12, lineHeight: 1.6, marginBottom: 2 }}>• {item}</div>)}
                       </div>
                       <div style={{ padding: 12, borderBottom: `1px solid ${COLORS.border}`, background: "rgba(59,130,246,0.12)" }}>
-                        <div style={{ color: "#60a5fa", fontSize: 12, fontWeight: 600, marginBottom: 4 }}>What's coming</div>
-                        <div style={{ color: COLORS.textPrimary, fontSize: 12, lineHeight: 1.6 }}>You will connect this topic to business decisions with case-based reasoning and formula trade-offs.</div>
+                        <div style={{ color: "#60a5fa", fontSize: 12, fontWeight: 600, marginBottom: 4 }}>What&apos;s coming</div>
+                        {(briefData.whats_coming || []).map((item, idx) => (
+                          <div key={`${item.concept}-${idx}`} style={{ marginBottom: 6 }}>
+                            <div style={{ color: COLORS.textPrimary, fontSize: 12, fontWeight: 600 }}>{item.concept}</div>
+                            <div style={{ color: COLORS.textSecondary, fontSize: 12, lineHeight: 1.5 }}>{item.why_it_matters}</div>
+                          </div>
+                        ))}
                       </div>
                       <div style={{ padding: 12, borderBottom: `1px solid ${COLORS.border}`, background: "rgba(217,119,6,0.12)" }}>
                         <div style={{ color: COLORS.warning, fontSize: 12, fontWeight: 600, marginBottom: 4 }}>Watch out for</div>
-                        <div style={{ color: COLORS.textPrimary, fontSize: 12, lineHeight: 1.6 }}>Common mistakes: mixing correlation with causality and ignoring segment-level effects.</div>
+                        {(briefData.watch_out_for || []).map((item, idx) => (
+                          <div key={`${item.misconception}-${idx}`} style={{ marginBottom: 6 }}>
+                            <div style={{ color: COLORS.textPrimary, fontSize: 12 }}>
+                              {item.misconception} → {item.reality}
+                            </div>
+                          </div>
+                        ))}
                       </div>
                       <div style={{ padding: 12, background: "rgba(124,58,237,0.12)" }}>
-                        <div style={{ color: COLORS.primary, fontSize: 12, fontWeight: 600, marginBottom: 4 }}>Key formulas to remember</div>
-                        <div style={{ color: COLORS.textPrimary, fontSize: 12, lineHeight: 1.6 }}>CLV, churn, elasticity, and forecasting error basics.</div>
-                        <div style={{ marginTop: 8, color: COLORS.textSecondary, fontSize: 11 }}>Estimated read: 5 min prep</div>
+                        <div style={{ color: COLORS.primary, fontSize: 12, fontWeight: 600, marginBottom: 4 }}>Key Formula</div>
+                        <div style={{ color: COLORS.textPrimary, fontSize: 12, lineHeight: 1.6 }}>{briefData.key_formula?.name || "-"}</div>
+                        {!!briefData.key_formula?.expression && <div style={{ color: COLORS.textSecondary, fontSize: 12, lineHeight: 1.6 }}>{briefData.key_formula.expression}</div>}
+                        {!!briefData.key_formula?.plain_english && <div style={{ color: COLORS.textSecondary, fontSize: 12, lineHeight: 1.6 }}>{briefData.key_formula.plain_english}</div>}
+                        {!!briefData.warm_up_question && <div style={{ marginTop: 8, color: "#a78bfa", fontSize: 12, fontStyle: "italic" }}>{briefData.warm_up_question}</div>}
                       </div>
                     </div>
                   )}
