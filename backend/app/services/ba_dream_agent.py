@@ -143,7 +143,7 @@ def process_session_dream(job: dict) -> None:
                     line for line in rendered_lines
                     if topic_name_lower in line.lower()
                 ]
-                if len(matched) < 2:
+                if len(matched) < 1:
                     continue
 
                 messages_text = "\n".join(matched)
