@@ -19,6 +19,7 @@ interface ChatMessage {
   content: string;
   timestamp: string;
   sources?: Source[];
+  isComplete?: boolean;
 }
 
 interface UploadedDoc {
@@ -85,15 +86,50 @@ interface BriefData {
   warm_up_question?: string;
 }
 
-interface CaseItem {
+type CaseTechniqueComplexity = "basic" | "intermediate" | "advanced";
+
+interface CaseStudy {
+  id: string;
   company: string;
   industry: string;
-  challenge: string;
-  data_used: string[];
-  ba_techniques: string[];
-  decision: string;
-  outcome: string;
-  discussion_questions: string[];
+  country: string;
+  year: string;
+  ba_topics?: string[];
+  logo_letter: string;
+  unit_color: string;
+  tagline: string;
+  hero_metric: {
+    value: string;
+    label: string;
+    context: string;
+  };
+  the_problem: string;
+  data_used: Array<{
+    type: string;
+    volume: string;
+    insight: string;
+  }>;
+  ba_techniques: Array<{
+    name: string;
+    description: string;
+    complexity: CaseTechniqueComplexity;
+  }>;
+  the_solution: string;
+  outcome: Array<{
+    metric: string;
+    result: string;
+    timeframe: string;
+  }>;
+  key_lesson: string;
+  discussion_starters: string[];
+}
+
+interface CaseChatMessage {
+  id: string;
+  role: MessageRole;
+  content: string;
+  timestamp: string;
+  isComplete?: boolean;
 }
 
 interface RecentSession {
@@ -160,76 +196,915 @@ const BA_TOPICS = [
 
 const CUSTOM_FORGE_TOPIC_VALUE = "__custom_topic__";
 
-const CASE_STUDIES: CaseItem[] = [
+const CASE_STUDIES: CaseStudy[] = [
   {
+    id: "netflix",
     company: "Netflix",
-    industry: "Streaming",
-    challenge: "Subscriber churn rose after regional price increases and uneven content engagement.",
-    data_used: ["Viewing hours by segment", "Plan-level retention", "Recommendation click-through", "Regional pricing response"],
-    ba_techniques: ["Churn modeling", "Cohort analysis", "A/B testing", "Price elasticity"],
-    decision: "Introduced mobile-only plans in sensitive markets and re-ranked home feed based on early session behavior.",
-    outcome: "Quarterly churn dropped and watch-time per active subscriber improved in target regions.",
-    discussion_questions: [
-      "Which leading indicators would you track weekly to predict churn spikes early?",
-      "How would you design a fair A/B test for pricing changes across regions?",
-      "What trade-offs exist between personalization depth and catalog diversity?",
+    industry: "Streaming & Entertainment",
+    country: "USA",
+    year: "2022",
+    logo_letter: "N",
+    unit_color: "#dc2626",
+    tagline: "How data killed the video store",
+    hero_metric: {
+      value: "$1B+",
+      label: "Saved annually",
+      context: "through recommendation engine reducing churn",
+    },
+    the_problem: `In 2006, Netflix was mailing DVDs and losing
+customers who couldn't find movies they wanted to watch.
+With 100,000+ titles and no way to surface the right one,
+subscribers cancelled rather than browse. The problem
+wasn't content — it was discovery. Netflix needed to
+predict what each of 200 million users would enjoy
+before they even searched for it.`,
+    data_used: [
+      {
+        type: "Viewing history",
+        volume: "250M+ hours watched daily",
+        insight: "Completion rate revealed true satisfaction better than ratings",
+      },
+      {
+        type: "Engagement signals",
+        volume: "30M daily \"plays\", pause, rewind events",
+        insight: "Re-watches predicted superfan segments worth targeting",
+      },
+      {
+        type: "Time & device data",
+        volume: "4M search queries daily",
+        insight: "Friday night mobile viewing had different taste profiles than weekend TV",
+      },
     ],
+    ba_techniques: [
+      {
+        name: "Collaborative Filtering",
+        description: "Found users with similar taste profiles and surfaced what they loved",
+        complexity: "advanced",
+      },
+      {
+        name: "RFM-style Engagement Scoring",
+        description: "Scored users by recency of watch, frequency of sessions, and depth of engagement",
+        complexity: "intermediate",
+      },
+      {
+        name: "A/B Testing at Scale",
+        description: "Tested 1000s of thumbnail variants per title to maximise click-through",
+        complexity: "intermediate",
+      },
+      {
+        name: "Churn Prediction Modelling",
+        description: "Identified subscribers showing disengagement signals 30 days before cancellation",
+        complexity: "advanced",
+      },
+    ],
+    the_solution: `Netflix built a two-tower recommendation
+system that combined content-based filtering
+(what the show is) with collaborative filtering
+(what similar users watched). They personalized
+not just recommendations but thumbnail artwork —
+a thriller fan saw action screenshots while a
+romance fan saw the same movie with different
+imagery. Every subscriber sees a different
+homepage.`,
+    outcome: [
+      { metric: "Churn reduction", result: "~25% lower monthly churn", timeframe: "Post-2012 rollout" },
+      { metric: "Content savings", result: "$1B+ annually", timeframe: "Ongoing" },
+      { metric: "Recommendation adoption", result: "80% of watched content", timeframe: "Comes from recommendations" },
+    ],
+    key_lesson: `Retention is cheaper than acquisition.
+Netflix proved that showing one perfectly matched
+title prevents a cancellation better than
+any discount.`,
+    discussion_starters: [
+      "Netflix uses completion rate instead of star ratings. Why might a 90% completion rate be more valuable signal than a 5-star review?",
+      "Their recommendation engine saves $1B but also creates \"filter bubbles\". Is that an acceptable tradeoff for a subscription business?",
+      "How would you adapt Netflix's RFM scoring to a grocery delivery app? What would Recency, Frequency, and Monetary mean in that context?",
+      "Netflix personalizes thumbnails per user. What are the ethical implications of showing different people different versions of the same product?",
+    ],
+    ba_topics: ["rfm_analysis", "churn_analytics", "ab_testing", "customer_seg_clv"],
   },
   {
+    id: "amazon",
     company: "Amazon",
-    industry: "E-commerce",
-    challenge: "Cart abandonment was high for same-day eligible products during peak windows.",
-    data_used: ["Checkout funnel events", "Delivery promise accuracy", "Warehouse pick times", "Customer support tickets"],
-    ba_techniques: ["Funnel analytics", "Queue optimization", "Root cause segmentation", "Forecasting"],
-    decision: "Adjusted promise windows by zip-code load and surfaced reliability badges at checkout.",
-    outcome: "Checkout completion increased with lower same-day cancellation rates.",
-    discussion_questions: [
-      "How would you separate UX friction from logistics constraints analytically?",
-      "Which dashboard views would operations and product teams each need?",
-      "What assumptions could bias your conversion uplift estimate?",
+    industry: "E-commerce & Cloud",
+    country: "USA",
+    year: "2023",
+    logo_letter: "A",
+    unit_color: "#d97706",
+    tagline: "Shipping you ordered before you knew you wanted it",
+    hero_metric: {
+      value: "35%",
+      label: "Of revenue",
+      context: "directly attributed to recommendation engine",
+    },
+    the_problem: `Amazon warehouses 350 million products across
+175 fulfillment centers. The core logistics problem:
+getting any product to any customer in 24 hours
+costs a fortune if you move it after the order.
+Amazon's insight — what if you moved inventory
+to the right city before customers ordered?
+To do that, you need to predict demand by
+location with terrifying accuracy.`,
+    data_used: [
+      {
+        type: "Purchase & browse history",
+        volume: "300M+ active customer profiles",
+        insight: "Browse-to-buy gap revealed purchase intent timing",
+      },
+      {
+        type: "Supply chain & inventory data",
+        volume: "350M SKUs tracked in real time",
+        insight: "Stockout prediction 2 weeks ahead prevented $2B in lost sales",
+      },
+      {
+        type: "External signals",
+        volume: "Weather, events, social trends",
+        insight: "A storm forecast in Texas predicts torch and battery sales 48h out",
+      },
     ],
+    ba_techniques: [
+      {
+        name: "Anticipatory Shipping (Predictive Logistics)",
+        description: "Moved inventory to regional hubs before orders arrived based on demand forecasts",
+        complexity: "advanced",
+      },
+      {
+        name: "Dynamic Pricing",
+        description: "Changed prices 2.5M times per day based on demand, competition, and inventory levels",
+        complexity: "advanced",
+      },
+      {
+        name: "Inventory Optimisation (EOQ variants)",
+        description: "Calculated optimal reorder points per SKU per warehouse using demand variability",
+        complexity: "intermediate",
+      },
+      {
+        name: "Customer Segmentation",
+        description: "Separated Prime vs non-Prime behavior to personalise promotions and pricing floors",
+        complexity: "basic",
+      },
+    ],
+    the_solution: `Amazon built a predictive logistics system
+that pre-positions inventory based on regional
+demand forecasts. Combined with dynamic pricing
+that responds to competitor prices every
+10 minutes, they created a flywheel:
+lower prices → more orders → more data →
+better forecasts → lower costs → lower prices.`,
+    outcome: [
+      { metric: "Delivery speed", result: "Same-day in 90+ cities", timeframe: "2023" },
+      { metric: "Inventory waste", result: "30% reduction in overstock", timeframe: "Vs 2015 baseline" },
+      { metric: "Revenue from recommendations", result: "35% of total", timeframe: "Annual" },
+    ],
+    key_lesson: `Demand forecasting is most powerful when
+it drives physical action — moving inventory,
+not just adjusting a webpage. The further
+upstream analytics reaches, the bigger the impact.`,
+    discussion_starters: [
+      "Amazon changes prices 2.5M times per day. Calculate: if average order value is $45 and they have 5M daily orders, what revenue impact does even a 0.5% pricing optimisation create?",
+      "Their anticipatory shipping system moves goods before orders exist. What happens when the forecast is wrong? How should they account for forecast error in inventory decisions?",
+      "Small retailers cannot afford Amazon's data infrastructure. What is the minimum viable version of demand forecasting a 10-person e-commerce business could implement?",
+      "Amazon uses your browse history even when you don't buy. Is there a point where personalisation becomes surveillance? Where would you draw the line as a BA practitioner?",
+    ],
+    ba_topics: ["inventory_control", "supply_chain_kpis", "forecasting_methods", "pricing_analytics", "customer_seg_clv"],
   },
   {
+    id: "zomato",
     company: "Zomato",
-    industry: "Food Delivery",
-    challenge: "Discount spending grew faster than net margin in key cities.",
-    data_used: ["Offer redemption logs", "Order frequency", "Customer lifetime value", "Restaurant commission data"],
-    ba_techniques: ["RFM segmentation", "CLV estimation", "Promotion optimization", "Causal inference"],
-    decision: "Moved from broad discounts to segment-aware bundles and retention-triggered offers.",
-    outcome: "Promo ROI improved with stronger repeat behavior in high-value segments.",
-    discussion_questions: [
-      "How would you define incremental lift versus cannibalized demand?",
-      "What CLV threshold should gate discount eligibility?",
-      "How do you avoid overfitting promotions to short-term behavior?",
+    industry: "Food Delivery & Tech",
+    country: "India",
+    year: "2023",
+    logo_letter: "Z",
+    unit_color: "#dc2626",
+    tagline: "Feeding 500 cities with 10-minute promises",
+    hero_metric: {
+      value: "10 min",
+      label: "Delivery target",
+      context: "Zomato Instant — requires sub-2min prep prediction",
+    },
+    the_problem: `Zomato operates in 500+ Indian cities where
+addresses don't have standardised postal codes,
+traffic is unpredictable, and 60% of orders
+come in a 2-hour dinner window. Promising
+delivery times they can't keep destroys
+trust. Getting it right requires predicting
+restaurant prep time, rider availability,
+and traffic — simultaneously — for
+millions of orders per day.`,
+    data_used: [
+      {
+        type: "Order & restaurant data",
+        volume: "500M+ orders analyzed",
+        insight: "Restaurant prep time varied 3x between weekday lunch and Friday dinner",
+      },
+      {
+        type: "Rider GPS & movement",
+        volume: "300,000+ delivery partners tracked",
+        insight: "Idle rider clustering by zone predicted pickup time within 90 seconds",
+      },
+      {
+        type: "Hyperlocal demand signals",
+        volume: "City × cuisine × time of day matrices",
+        insight: "Biryani demand in Hyderabad on Friday night was 12x Tuesday lunch",
+      },
     ],
+    ba_techniques: [
+      {
+        name: "Time Series Demand Forecasting",
+        description: "Predicted order volumes per zone per hour to pre-position riders before demand spikes",
+        complexity: "intermediate",
+      },
+      {
+        name: "Dynamic Surge Pricing",
+        description: "Raised delivery fees during peak demand to balance supply and reduce wait times",
+        complexity: "intermediate",
+      },
+      {
+        name: "Churn & Loyalty Analytics",
+        description: "Identified users who ordered once and never returned — triggered win-back campaigns",
+        complexity: "intermediate",
+      },
+      {
+        name: "Supply Chain Optimisation",
+        description: "Zomato Hyperpure used demand data to help restaurants order ingredients 48h ahead",
+        complexity: "advanced",
+      },
+    ],
+    the_solution: `Zomato built a real-time demand prediction
+engine that pre-positions delivery riders
+in zones 20-30 minutes before demand arrives.
+Their ML model predicts restaurant prep time
+per dish, combines it with live traffic and
+rider location data to give an accurate
+delivery ETA before the customer even
+confirms the order.`,
+    outcome: [
+      { metric: "ETA accuracy", result: "92%+ on-time delivery", timeframe: "2023" },
+      { metric: "Rider efficiency", result: "40% more deliveries per rider per hour", timeframe: "Post-ML routing" },
+      { metric: "Customer retention", result: "3x higher repeat order rate", timeframe: "For users with accurate first ETA" },
+    ],
+    key_lesson: `In hyperlocal businesses, time series
+forecasting at the micro-zone level
+(not city level) is what separates
+accurate ETAs from broken promises.
+Granularity of data determines
+quality of prediction.`,
+    discussion_starters: [
+      "Zomato pre-positions riders before orders arrive. What data would you need to build this model, and what would be your key forecast variable?",
+      "Their surge pricing raises fees when demand peaks. Use the PED formula: if a 20% fee increase causes 8% order drop, what is the price elasticity? Is this elastic or inelastic?",
+      "Zomato has different data quality in Mumbai vs a Tier-3 city. How should a BA team adjust their models when historical data is sparse?",
+      "Gig workers bear the cost of demand unpredictability through income volatility. Should Zomato's analytics team consider rider income stability as a KPI alongside delivery speed?",
+    ],
+    ba_topics: ["time_series_ba", "trend_seasonality", "churn_analytics", "supply_chain_kpis", "price_elasticity"],
   },
   {
+    id: "walmart",
     company: "Walmart",
-    industry: "Retail",
-    challenge: "Frequent stockouts in fast-moving categories while carrying excess inventory in others.",
-    data_used: ["POS time series", "Supplier lead times", "Promotion calendar", "Store-level seasonality"],
-    ba_techniques: ["EOQ", "Demand forecasting", "Safety stock modeling", "KPI monitoring"],
-    decision: "Recalibrated reorder points with category-specific seasonality and lead-time variability.",
-    outcome: "Lower stockouts and better inventory turns across pilot stores.",
-    discussion_questions: [
-      "Which forecast errors most directly hurt shelf availability?",
-      "How would you validate EOQ assumptions in volatile demand periods?",
-      "What KPI mix best balances service level and carrying cost?",
+    industry: "Retail & Supply Chain",
+    country: "USA",
+    year: "2023",
+    logo_letter: "W",
+    unit_color: "#2563eb",
+    tagline: "How a hurricane warning sells strawberry Pop-Tarts",
+    hero_metric: {
+      value: "$2.1B",
+      label: "Saved annually",
+      context: "through predictive inventory and waste reduction",
+    },
+    the_problem: `Walmart serves 230 million customers weekly
+across 10,500 stores. The inventory challenge:
+overstock wastes $300B+ industry-wide annually,
+while stockouts cost 4% of revenue. Every store
+has different demand patterns — a store near a
+stadium needs beer before game day, a store in
+a hurricane zone needs different goods
+than one in a mild climate. One-size
+supply chain kills margin.`,
+    data_used: [
+      {
+        type: "POS transaction data",
+        volume: "2.5 petabytes generated daily",
+        insight: "Strawberry Pop-Tart sales increase 7x before a hurricane — not obvious until you analyze it",
+      },
+      {
+        type: "External event data",
+        volume: "Weather, local events, school calendars",
+        insight: "Back-to-school timing varied by 3 weeks across US regions",
+      },
+      {
+        type: "Supplier & logistics data",
+        volume: "100,000+ suppliers connected",
+        insight: "Lead time variability by supplier predicted stockout risk 3 weeks ahead",
+      },
     ],
+    ba_techniques: [
+      {
+        name: "Predictive Demand Forecasting",
+        description: "Used weather + event + historical data to predict demand per SKU per store 2 weeks ahead",
+        complexity: "advanced",
+      },
+      {
+        name: "EOQ and Safety Stock Optimisation",
+        description: "Calculated optimal order quantities per store factoring in demand variability and supplier lead time",
+        complexity: "intermediate",
+      },
+      {
+        name: "Supplier Performance Analytics",
+        description: "Scored suppliers on OTIF (On Time In Full) and used scores to adjust safety stock levels",
+        complexity: "intermediate",
+      },
+      {
+        name: "Promotional Lift Modelling",
+        description: "Quantified true uplift from promotions vs baseline demand to avoid over-ordering",
+        complexity: "advanced",
+      },
+    ],
+    the_solution: `Walmart built a Retail Link system connecting
+100,000 suppliers to real-time store-level
+sales data. Suppliers can see their products
+selling in real time and adjust shipments
+proactively. Combined with ML demand
+forecasting that ingests weather, events,
+and local calendars, stores receive
+the right inventory before they need it.`,
+    outcome: [
+      { metric: "Inventory waste", result: "15% reduction in food waste", timeframe: "2023" },
+      { metric: "Stockout rate", result: "From 8% to under 3%", timeframe: "2018-2023" },
+      { metric: "Supplier efficiency", result: "98.5% OTIF rate for top-tier suppliers", timeframe: "2023" },
+    ],
+    key_lesson: `External data (weather, events, local context)
+often explains demand spikes that pure
+historical analysis misses entirely.
+The Pop-Tart insight only emerged by
+joining sales data with hurricane records.`,
+    discussion_starters: [
+      "Walmart found Pop-Tart sales spike 7x before hurricanes. Walk through how you would discover this insight — what data join, what analysis, what would you look for?",
+      "Calculate EOQ for a Walmart store: annual demand 50,000 units, ordering cost $200 per order, holding cost $4 per unit per year. What is the optimal order quantity?",
+      "Walmart shares real-time sales data with 100,000 suppliers. What are the competitive risks of this level of data transparency, and how would you manage them?",
+      "Their OTIF scoring system penalises late suppliers. A small local supplier in a rural area has worse logistics than a national one — is OTIF a fair metric for all supplier sizes?",
+    ],
+    ba_topics: ["inventory_control", "supply_chain_kpis", "forecasting_methods", "promo_optimization", "experimental_design"],
   },
   {
+    id: "airbnb",
     company: "Airbnb",
-    industry: "Travel",
-    challenge: "Conversion dipped for first-time users despite high listing inventory.",
-    data_used: ["Search-to-book funnel", "Host response times", "Review sentiment", "Pricing competitiveness"],
-    ba_techniques: ["Sentiment analysis", "Experimentation", "Behavioral segmentation", "Recommendation ranking"],
-    decision: "Prioritized trustworthy listings for new users and nudged hosts on response-time SLAs.",
-    outcome: "First-book conversion improved and trust-related support issues declined.",
-    discussion_questions: [
-      "How would you quantify trust signals in a ranking model?",
-      "What experiment design isolates host-response effects from price effects?",
-      "Which user segments need different onboarding flows?",
+    industry: "Travel & Marketplace",
+    country: "USA",
+    year: "2023",
+    logo_letter: "Ab",
+    unit_color: "#ec4899",
+    tagline: "Pricing 7 million listings in real time",
+    hero_metric: {
+      value: "40%",
+      label: "Revenue increase",
+      context: "for hosts using Smart Pricing vs manual pricing",
+    },
+    the_problem: `Airbnb hosts are regular people, not revenue
+managers. Most price their listing once and
+forget it — which means they're too expensive
+during slow seasons and too cheap during
+festivals. A host in Bangalore during IPL
+season could charge 3x their normal rate.
+A host in Goa in monsoon should drop 60%.
+Without dynamic pricing, hosts leave
+massive money on the table and Airbnb
+earns less commission.`,
+    data_used: [
+      {
+        type: "Booking & search data",
+        volume: "7M+ listings, 150M+ users",
+        insight: "Search-to-book ratio per listing revealed optimal price ceiling",
+      },
+      {
+        type: "Local event & seasonal data",
+        volume: "500,000+ events tracked globally",
+        insight: "Concert announcements caused 200-400% price elasticity in nearby listings",
+      },
+      {
+        type: "Competitive listing data",
+        volume: "Neighbouring listings repriced 24M times daily",
+        insight: "Price positioning relative to comparable listings drove occupancy more than absolute price",
+      },
     ],
+    ba_techniques: [
+      {
+        name: "Dynamic Pricing (Smart Pricing)",
+        description: "Automatically adjusted nightly rates based on demand signals, local events, and competitor pricing",
+        complexity: "advanced",
+      },
+      {
+        name: "Price Elasticity Measurement",
+        description: "Calculated PED per listing category and market to find optimal price-occupancy tradeoffs",
+        complexity: "intermediate",
+      },
+      {
+        name: "Trust & Safety Scoring",
+        description: "Used review text sentiment analysis and behavior patterns to predict host/guest reliability",
+        complexity: "advanced",
+      },
+      {
+        name: "CLV Modelling for Hosts",
+        description: "Predicted long-term host value to prioritize onboarding support for high-potential properties",
+        complexity: "intermediate",
+      },
+    ],
+    the_solution: `Airbnb's Smart Pricing engine analyzes
+hundreds of signals per listing per night:
+local events, historical demand curves,
+competitor pricing, days until check-in,
+and seasonal patterns. It suggests
+prices that maximize revenue while
+maintaining occupancy targets —
+and learns from each booking outcome.`,
+    outcome: [
+      { metric: "Host revenue", result: "40% higher for Smart Pricing users", timeframe: "vs manual pricing" },
+      { metric: "Occupancy", result: "20% higher average occupancy rate", timeframe: "2023" },
+      { metric: "Platform GMV", result: "$63B in 2023", timeframe: "Up from $46B in 2021" },
+    ],
+    key_lesson: `Dynamic pricing works only when customers
+perceive the value as fair. Airbnb balances
+revenue optimisation with transparent
+price explanations — showing guests
+WHY a price is high prevents abandonment
+that purely algorithmic pricing causes.`,
+    discussion_starters: [
+      "A host's listing gets 20 views but 0 bookings at $120/night. At $90/night it gets 3 bookings. Calculate the price elasticity of demand. What should the host charge?",
+      "Airbnb's algorithm raises prices during disasters (evacuees fleeing floods need housing). Should a pricing algorithm have ethical overrides? Who decides what those are?",
+      "Design a CLV model for Airbnb hosts. What variables would predict whether a new host will still be active in 2 years, and why does Airbnb care about that number?",
+      "Smart Pricing gave hosts 40% more revenue. Why would any host NOT use it? What behavioural or psychological reasons might explain resistance to algorithmic pricing?",
+    ],
+    ba_topics: ["price_elasticity", "pricing_analytics", "customer_seg_clv", "text_sentiment", "ab_testing"],
+  },
+  {
+    id: "spotify",
+    company: "Spotify",
+    industry: "Music Streaming",
+    country: "Sweden",
+    year: "2023",
+    logo_letter: "S",
+    unit_color: "#059669",
+    tagline: "The algorithm that knows you better than your friends",
+    hero_metric: {
+      value: "626M",
+      label: "Monthly users",
+      context: "driven primarily by personalisation, not marketing spend",
+    },
+    the_problem: `Spotify has 100 million songs. The average
+user actively knows maybe 200. The discovery
+problem: how do you surface song 201 — one
+they'll love but have never heard — from
+a catalogue 500,000x larger than their
+awareness? Get it wrong and they skip.
+Too many skips and they churn.
+Spotify's business model lives or
+dies on discovery quality.`,
+    data_used: [
+      {
+        type: "Listening behaviour",
+        volume: "30M+ songs streamed per hour",
+        insight: "Skip within 30 seconds was a stronger dislike signal than explicit thumbs down",
+      },
+      {
+        type: "Audio feature data",
+        volume: "100M+ tracks analyzed acoustically",
+        insight: "Tempo, key, energy, danceability created a 13-dimension taste fingerprint per user",
+      },
+      {
+        type: "Contextual data",
+        volume: "Time, device, location, playlist name",
+        insight: "\"Workout\" playlist listeners tolerated higher BPM and lower lyric complexity",
+      },
+    ],
+    ba_techniques: [
+      {
+        name: "Natural Language Processing on Playlists",
+        description: "Analyzed billions of playlist names and blog text to understand how songs cluster culturally",
+        complexity: "advanced",
+      },
+      {
+        name: "Cohort-based Churn Analysis",
+        description: "Identified listening drop-off patterns that predicted free-to-paid conversion failure",
+        complexity: "intermediate",
+      },
+      {
+        name: "A/B Testing at Massive Scale",
+        description: "Tested Discover Weekly algorithm variants on 140M users simultaneously",
+        complexity: "advanced",
+      },
+      {
+        name: "RFM Engagement Scoring",
+        description: "Scored users by listening recency, frequency, and depth to identify at-risk subscribers",
+        complexity: "basic",
+      },
+    ],
+    the_solution: `Spotify's Discover Weekly combines three
+approaches: collaborative filtering
+(users who like X also like Y),
+audio analysis (acoustically similar
+tracks), and NLP on cultural context
+(what music writers say about artists).
+The result — 30-song weekly playlist
+personalized per user — drove more
+engagement than any other feature
+in Spotify's history.`,
+    outcome: [
+      { metric: "Discover Weekly streams", result: "5B+ streams in first year", timeframe: "2016 launch" },
+      { metric: "User retention", result: "40% higher for users who engage with recommendations", timeframe: "Ongoing" },
+      { metric: "Artist discovery", result: "75% of Discover Weekly streams are new-to-user artists", timeframe: "2023" },
+    ],
+    key_lesson: `Implicit signals (skip rate, replay,
+playlist adds) are far more honest
+than explicit ones (ratings, likes).
+Design your data collection around
+what users DO, not what they SAY.`,
+    discussion_starters: [
+      "Spotify uses \"skip within 30 seconds\" as a dislike signal. Why might this be more reliable than a thumbs-down button? What other implicit signals would you mine from a music app?",
+      "Their RFM model for music engagement — what would Recency, Frequency, and Monetary map to in a subscription streaming context where there's no direct transaction per song?",
+      "Discover Weekly creates filter bubbles in music taste. Is algorithmic personalisation making culture more fragmented? Does a BA practitioner have responsibility for that outcome?",
+      "If Spotify's churn model identifies a user is likely to cancel, what interventions would you test using A/B testing? Design the experiment with hypothesis, variant, and success metric.",
+    ],
+    ba_topics: ["rfm_analysis", "churn_analytics", "text_sentiment", "ab_testing", "customer_seg_clv"],
+  },
+  {
+    id: "uber",
+    company: "Uber",
+    industry: "Ride-hailing & Logistics",
+    country: "USA",
+    year: "2023",
+    logo_letter: "U",
+    unit_color: "#1a1a24",
+    tagline: "Surge pricing: hated by users, loved by economists",
+    hero_metric: {
+      value: "19M",
+      label: "Trips per day",
+      context: "balanced across supply and demand using real-time analytics",
+    },
+    the_problem: `On New Year's Eve, demand for rides in
+Mumbai increases 800% in 20 minutes.
+Uber has a fixed number of drivers.
+Without intervention, all riders
+get the app — none get a car.
+The marketplace collapses. Uber's
+challenge: use pricing and incentives
+to balance supply and demand
+in real time across 70 countries
+simultaneously, with no central
+inventory and no employed workforce.`,
+    data_used: [
+      {
+        type: "Real-time ride requests",
+        volume: "19M trips daily, GPS updated every 4 seconds",
+        insight: "Demand hotspots moved predictably — bars close at 2am, offices at 6pm",
+      },
+      {
+        type: "Driver supply data",
+        volume: "5M+ drivers globally tracked in real time",
+        insight: "Driver log-on rates responded to surge multipliers within 8 minutes",
+      },
+      {
+        type: "Historical demand patterns",
+        volume: "10 years of city-level data",
+        insight: "Weather + event + time-of-day explained 78% of demand variance",
+      },
+    ],
+    ba_techniques: [
+      {
+        name: "Dynamic Surge Pricing",
+        description: "Raised prices in high-demand zones to attract drivers and reduce demand until supply matched",
+        complexity: "intermediate",
+      },
+      {
+        name: "Geospatial Demand Forecasting",
+        description: "Predicted demand per hexagonal zone 15-30 minutes ahead to pre-position driver incentives",
+        complexity: "advanced",
+      },
+      {
+        name: "Driver Incentive Optimisation",
+        description: "Used experimentation to find minimum bonus required to bring drivers to undersupplied zones",
+        complexity: "advanced",
+      },
+      {
+        name: "Fraud Detection Analytics",
+        description: "Identified fake trip patterns and rating manipulation using behavioral anomaly detection",
+        complexity: "advanced",
+      },
+    ],
+    the_solution: `Uber built a real-time two-sided marketplace
+balancing engine. On the demand side:
+surge pricing signals scarcity and
+reduces frivolous requests. On the
+supply side: driver incentives and
+forward-looking heat maps pull
+drivers toward future demand.
+The result is a system that
+self-balances in under 10 minutes
+in most markets.`,
+    outcome: [
+      { metric: "Wait time", result: "Average 4 minutes globally", timeframe: "2023" },
+      { metric: "Surge frequency", result: "40% reduction in surge events", timeframe: "After predictive positioning" },
+      { metric: "Driver earnings", result: "25% higher for drivers using heat map guidance", timeframe: "2023" },
+    ],
+    key_lesson: `Two-sided marketplaces require analytics
+on BOTH sides simultaneously. Optimising
+only for riders destroys driver supply.
+Optimising only for drivers destroys
+rider experience. The analytics challenge
+is finding the equilibrium.`,
+    discussion_starters: [
+      "During NYE, Uber's surge is 4x. If base fare is ₹150 and demand elasticity is -0.6, what % drop in ride requests should Uber expect? Is this a good outcome for the platform?",
+      "Uber uses a minimum experiment unit of one city for A/B tests. Why can't they randomize at the individual rider level, and what statistical problem does city-level testing create?",
+      "Their driver incentive model finds the minimum bonus needed to attract supply. Is this ethically different from simply paying drivers a fair wage? Defend your position with data.",
+      "Design a churn model for Uber drivers. What signals would predict a driver is about to stop driving, and what intervention would you test to retain them?",
+    ],
+    ba_topics: ["price_elasticity", "pricing_analytics", "experimental_design", "ab_testing", "time_series_ba"],
+  },
+  {
+    id: "starbucks",
+    company: "Starbucks",
+    industry: "Food & Beverage Retail",
+    country: "USA",
+    year: "2023",
+    logo_letter: "Sb",
+    unit_color: "#059669",
+    tagline: "A loyalty program with 31 million members and zero punch cards",
+    hero_metric: {
+      value: "57%",
+      label: "Of US revenue",
+      context: "from Starbucks Rewards members",
+    },
+    the_problem: `Coffee is a commodity. Any café can
+make a latte. Starbucks' challenge:
+turn a $5 transaction into a
+relationship worth $1,400 over
+a customer's lifetime. With 36,000
+stores and 8 million daily US visits,
+they had an ocean of data but needed
+to use it to personalize at scale —
+making 31 million members feel
+individually known without
+a human remembering their order.`,
+    data_used: [
+      {
+        type: "Transaction & loyalty data",
+        volume: "90M+ weekly interactions via app",
+        insight: "Order time variance predicted life event changes (job change, relocation, pregnancy)",
+      },
+      {
+        type: "Location & store data",
+        volume: "36,000 stores with granular foot traffic",
+        insight: "Drive-through vs walk-in behavior predicted mobile order adoption 6 months early",
+      },
+      {
+        type: "Weather & seasonal data",
+        volume: "Hourly weather per store location",
+        insight: "Cold snap in October triggered Pumpkin Spice demand 2 weeks before planned launch",
+      },
+    ],
+    ba_techniques: [
+      {
+        name: "Personalised Offer Engine (CLV-driven)",
+        description: "Sent different offers to each of 31M members based on predicted lifetime value and order history",
+        complexity: "advanced",
+      },
+      {
+        name: "Cohort-based RFM Analysis",
+        description: "Segmented customers by recency of visit, order frequency, and spend level for targeted re-engagement",
+        complexity: "intermediate",
+      },
+      {
+        name: "Market Basket Analysis",
+        description: "Found which drink + food combinations predicted highest spend and designed bundle promotions",
+        complexity: "intermediate",
+      },
+      {
+        name: "Site Selection Analytics",
+        description: "Used foot traffic, demographics, and competitor data to predict revenue for potential new stores",
+        complexity: "advanced",
+      },
+    ],
+    the_solution: `Starbucks built a personalization engine
+called Deep Brew that powers offers,
+menu recommendations, and even music
+in stores. When you open the app,
+the offers shown are unique to you —
+based on your order history, weather,
+time of day, and predicted next visit.
+A lapsed customer sees a comeback offer.
+A high-CLV customer sees an upsell.
+A new member sees a discovery offer.`,
+    outcome: [
+      { metric: "Loyalty revenue share", result: "57% of US revenue", timeframe: "2023" },
+      { metric: "Personalized offer redemption", result: "3x higher vs generic offers", timeframe: "Internal benchmark" },
+      { metric: "App active users", result: "31.4M active Rewards members", timeframe: "Q4 2023" },
+    ],
+    key_lesson: `The most powerful loyalty programs
+don't reward frequency — they
+reward identity. Starbucks members
+return not for the points but
+because the app makes them feel
+individually understood.
+Analytics enables that feeling at scale.`,
+    discussion_starters: [
+      "Starbucks detects life events (new job, relocation) from order time changes. Design the analysis: what change in ordering pattern would signal a customer changed jobs? What would you do with that insight?",
+      "Their RFM model has 31M members. A \"hibernating\" segment visits once per quarter. Calculate: if you convert 5% of 8M hibernators to monthly visitors at $7 average, what is the annual revenue impact?",
+      "Deep Brew shows different menu items to different customers. Is it ethical to show a customer who always buys cheap items a premium upsell? Where is the line between personalization and manipulation?",
+      "Site selection analytics uses competitor data to choose new store locations. If Starbucks opens near an independent café and uses data to outcompete them, is that a responsible use of analytics?",
+    ],
+    ba_topics: ["rfm_analysis", "customer_seg_clv", "promo_optimization", "customer_data", "churn_analytics"],
+  },
+  {
+    id: "flipkart",
+    company: "Flipkart",
+    industry: "E-commerce",
+    country: "India",
+    year: "2023",
+    logo_letter: "F",
+    unit_color: "#2563eb",
+    tagline: "Big Billion Days: ₹50,000 crore in 5 days",
+    hero_metric: {
+      value: "11x",
+      label: "Traffic spike",
+      context: "during Big Billion Days — predicted and prepared for weeks ahead",
+    },
+    the_problem: `Flipkart's Big Billion Days sale
+generates more orders in 5 days
+than most months combined.
+In 2022, a traffic spike crashed
+their website in the first hour
+of the sale — costing crores
+in lost revenue and trust.
+The challenge: predict demand
+per category per pincode,
+pre-position inventory across
+21 warehouses, and scale server
+infrastructure — all before
+the sale starts.`,
+    data_used: [
+      {
+        type: "Wishlist & cart abandonment data",
+        volume: "500M+ wishlist adds pre-sale",
+        insight: "Wishlist adds 72h before sale predicted category demand with 85% accuracy",
+      },
+      {
+        type: "Search trend data",
+        volume: "Internal search + Google Trends",
+        insight: "Search velocity for specific products 2 weeks pre-sale predicted sell-out risk",
+      },
+      {
+        type: "Logistics & pincode data",
+        volume: "19,000+ pincodes served",
+        insight: "Tier-2 city demand grew 60% YoY — required different inventory mix than metros",
+      },
+    ],
+    ba_techniques: [
+      {
+        name: "Demand Sensing (Pre-sale Signals)",
+        description: "Used wishlist, search, and cart data to forecast sale demand before it happened",
+        complexity: "advanced",
+      },
+      {
+        name: "Inventory Optimisation at Scale",
+        description: "Pre-positioned stock in 21 warehouses based on pincode-level demand forecasts",
+        complexity: "advanced",
+      },
+      {
+        name: "Dynamic Discount Optimisation",
+        description: "Calculated minimum discount needed per SKU to clear inventory without over-discounting",
+        complexity: "intermediate",
+      },
+      {
+        name: "Customer Segmentation for Targeting",
+        description: "Sent early access to high-CLV customers and personalized deal notifications by segment",
+        complexity: "intermediate",
+      },
+    ],
+    the_solution: `Flipkart built a pre-sale demand
+intelligence system that ingests
+wishlist, search, and browse data
+to forecast demand 2-3 weeks ahead.
+Inventory is pre-positioned across
+warehouses by pincode demand cluster.
+Server infrastructure scales
+automatically using demand forecasts
+as triggers — not reactive auto-scaling
+but predictive pre-scaling.`,
+    outcome: [
+      { metric: "Sale revenue", result: "₹50,000 crore+ in 5 days", timeframe: "2023" },
+      { metric: "On-time delivery", result: "95% during peak sale", timeframe: "Big Billion Days 2023" },
+      { metric: "Seller participation", result: "1.4M sellers, 150M products", timeframe: "2023 sale" },
+    ],
+    key_lesson: `Demand sensing — using pre-purchase
+signals to predict sale demand —
+is more valuable than historical
+forecasting for event-driven retail.
+What customers do before they buy
+tells you more than what they bought
+last year.`,
+    discussion_starters: [
+      "Flipkart uses wishlist data to forecast demand. If 500M wishlist adds result in 85M orders, what is the wishlist-to-purchase conversion rate? How would you use this to set inventory levels?",
+      "They pre-position inventory across 21 warehouses before demand is confirmed. Calculate the cost of being wrong: if you over-stock by 20% on ₹10,000 crore of inventory at 15% holding cost, what is the annual cost?",
+      "Big Billion Days gives early access to high-CLV customers. Design the customer segmentation: what metrics define \"high CLV\" for an e-commerce customer, and what is the RFM profile you would target?",
+      "Dynamic discount optimisation sets minimum discounts per SKU. Ethically, if Flipkart knows a customer will buy at 20% off but shows them a 40% discount, is that honest pricing?",
+    ],
+    ba_topics: ["inventory_control", "supply_chain_kpis", "customer_seg_clv", "forecasting_methods", "promo_optimization"],
+  },
+  {
+    id: "linkedin",
+    company: "LinkedIn",
+    industry: "Professional Network & HR Tech",
+    country: "USA",
+    year: "2023",
+    logo_letter: "Li",
+    unit_color: "#2563eb",
+    tagline: "The algorithm that decides who gets hired",
+    hero_metric: {
+      value: "8",
+      label: "Jobs filled per minute",
+      context: "powered by skills-based matching analytics",
+    },
+    the_problem: `LinkedIn has 950 million members
+and 58,000 companies hiring.
+The matching problem: a recruiter
+posts a job and gets 500 applications.
+A job seeker applies to 50 jobs
+and hears back from 2.
+Both sides are overwhelmed.
+LinkedIn's challenge: build
+a two-sided matching system
+that surfaces the right candidate
+to the right recruiter —
+before either of them
+even starts searching.`,
+    data_used: [
+      {
+        type: "Profile & skills data",
+        volume: "950M member profiles, 41,000 skills tracked",
+        insight: "Skills adjacency graph revealed non-obvious career transitions with high success rates",
+      },
+      {
+        type: "Job application outcomes",
+        volume: "Billions of application + response events",
+        insight: "Response rate by skill combination predicted job match quality better than job title",
+      },
+      {
+        type: "Economic signals",
+        volume: "Hiring rates by industry × location × role",
+        insight: "LinkedIn Economic Graph predicted tech layoffs 6 months before they were announced",
+      },
+    ],
+    ba_techniques: [
+      {
+        name: "Skills-based CLV for Members",
+        description: "Predicted which members would become premium subscribers based on job-seeking intensity signals",
+        complexity: "intermediate",
+      },
+      {
+        name: "Two-sided Matching Analytics",
+        description: "Scored job-candidate fit on 100+ dimensions to rank applicants and surface relevant jobs",
+        complexity: "advanced",
+      },
+      {
+        name: "A/B Testing on Feed Algorithm",
+        description: "Tested engagement vs professional value tradeoff in feed — viral posts vs career-relevant content",
+        complexity: "advanced",
+      },
+      {
+        name: "Cohort Analysis for Skill Gaps",
+        description: "Identified which skill additions most improved job offer rates for specific career paths",
+        complexity: "intermediate",
+      },
+    ],
+    the_solution: `LinkedIn built a Skills Graph connecting
+41,000 skills across roles, industries,
+and geographies. Their matching algorithm
+ranks candidates not by job title
+but by skills adjacency — finding
+people who have 80% of a job's
+required skills and can grow into
+the rest. This surfaces non-obvious
+candidates recruiters would never
+find manually, while showing
+job seekers roles they hadn't
+considered.`,
+    outcome: [
+      { metric: "Job fills", result: "8 per minute globally", timeframe: "2023" },
+      { metric: "Skills-first hiring adoption", result: "45% of hirers use skills filters", timeframe: "2023" },
+      { metric: "Premium conversion", result: "39% revenue growth", timeframe: "2023" },
+    ],
+    key_lesson: `Job titles are a proxy for skills,
+and a bad one. When LinkedIn moved
+from title-matching to skill-matching,
+application-to-interview rates improved
+significantly. Analytics that goes
+beneath surface labels to underlying
+capability unlocks better decisions.`,
+    discussion_starters: [
+      "LinkedIn's algorithm ranks your profile for recruiters. What data points would you include in a CLV model for LinkedIn members, and how would you weight job-seeking intensity signals?",
+      "They found skills adjacency predicts career success better than job titles. Design an A/B test to prove this: what is your hypothesis, control group, treatment, and success metric?",
+      "LinkedIn's Economic Graph predicted tech layoffs 6 months early from hiring rate drops. Is it ethical for a platform to publish this prediction? What are the consequences of being wrong?",
+      "Their feed A/B test found viral content drives more engagement than career content. If you were the BA lead, what metric would you optimize for, and how would you justify that to leadership?",
+    ],
+    ba_topics: ["customer_seg_clv", "ab_testing", "experimental_design", "text_sentiment", "churn_analytics"],
   },
 ];
 
@@ -415,9 +1290,14 @@ function MessageMarkdown({ content, isStreaming }: { content: string; isStreamin
         },
       }}
     >
-      {content}
+      {preprocessLatex(content)}
     </ReactMarkdown>
   );
+}
+
+function preprocessLatex(content: string): string {
+  // Escape currency dollar signs so they are not parsed as LaTeX delimiters.
+  return content.replace(/\$(?=[\d,]+)/g, "\\$");
 }
 
 export default function BusinessAnalyticsPage() {
@@ -464,7 +1344,12 @@ export default function BusinessAnalyticsPage() {
   const [forgeLoading, setForgeLoading] = useState(false);
   const [forgeResult, setForgeResult] = useState<ForgeResult | null>(null);
 
-  const [caseIndex, setCaseIndex] = useState(0);
+  const [fullscreenCase, setFullscreenCase] = useState<CaseStudy | null>(null);
+  const [caseMessages, setCaseMessages] = useState<CaseChatMessage[]>([]);
+  const [caseInput, setCaseInput] = useState("");
+  const [caseStreaming, setCaseStreaming] = useState(false);
+  const [caseAbortController, setCaseAbortController] = useState<AbortController | null>(null);
+  const [caseMobileTab, setCaseMobileTab] = useState<"case" | "chat">("case");
 
   const [examTopic, setExamTopic] = useState(BA_TOPICS[0]);
   const [examDifficulty, setExamDifficulty] = useState("intermediate");
@@ -486,6 +1371,9 @@ export default function BusinessAnalyticsPage() {
   const formulaScrollRef = useRef<HTMLDivElement>(null);
   const sessionIdRef = useRef<string | null>(null);
   const toolResizeRef = useRef({ active: false, startX: 0, startWidth: 380 });
+  const caseTextareaRef = useRef<HTMLTextAreaElement>(null);
+  const caseMessagesScrollRef = useRef<HTMLDivElement>(null);
+  const caseMessagesEndRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     setMounted(true);
@@ -551,6 +1439,17 @@ export default function BusinessAnalyticsPage() {
   }, [messages, isStreaming]);
 
   useEffect(() => {
+    caseMessagesScrollRef.current?.scrollTo({ top: caseMessagesScrollRef.current.scrollHeight, behavior: "smooth" });
+    caseMessagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [caseMessages, caseStreaming]);
+
+  useEffect(() => {
+    if (fullscreenCase) {
+      setCaseMobileTab("case");
+    }
+  }, [fullscreenCase]);
+
+  useEffect(() => {
     if (!isMobile) return;
     const handleResize = () => {
       if (messagesEndRef.current) {
@@ -569,13 +1468,6 @@ export default function BusinessAnalyticsPage() {
   }, [activeTool]);
 
   useEffect(() => {
-    if (activeTool === "case") {
-      const company = String(toolData?.company || "").toLowerCase();
-      if (!company) return;
-      const idx = CASE_STUDIES.findIndex((item) => item.company.toLowerCase() === company);
-      if (idx >= 0) setCaseIndex(idx);
-    }
-
     if (activeTool === "formula") {
       const formula = String(toolData?.formula || "").toLowerCase();
       const map: Record<string, number> = { rfm: 0, clv: 1, ped: 2, eoq: 3, churn: 4 };
@@ -850,6 +1742,7 @@ export default function BusinessAnalyticsPage() {
 
       const reader = res.body.getReader();
       const decoder = new TextDecoder();
+      let sseBuffer = "";
 
       const drip = () => {
         if (wordQueue.length === 0) {
@@ -863,59 +1756,96 @@ export default function BusinessAnalyticsPage() {
         setTimeout(drip, 22);
       };
 
-      while (!done) {
-        const { done: streamDone, value } = await reader.read();
-        if (streamDone) break;
-        const chunk = decoder.decode(value, { stream: true });
+      const processSsePayload = (raw: string) => {
+        const rawForControl = raw.trim();
+        if (rawForControl === "[DONE]") {
+          done = true;
+          return;
+        }
 
-        for (const line of chunk.split("\n")) {
-          if (!line.startsWith("data: ")) continue;
-          const raw = line.slice(6).trim();
-          if (raw === "[DONE]") {
-            done = true;
-            break;
-          }
-
-          if (raw.startsWith("[TOOL_SIGNAL]")) {
-            try {
-              const signal = JSON.parse(raw.slice(13));
-              if (signal.type === "tool_activate") {
-                setActiveTool(signal.tool as ToolKey);
-                setToolData(signal.tool_data || {});
-                setSuggestedTool(null);
-              } else if (signal.type === "tool_suggest") {
-                setSuggestedTool(signal.tool || null);
-              }
-            } catch {
-              // ignore malformed tool signals
-            }
-            continue;
-          }
-
+        if (rawForControl.startsWith("[TOOL_SIGNAL]")) {
           try {
-            const parsed = JSON.parse(raw);
-            if (parsed.session_id && !sessionIdRef.current) {
-              sessionIdRef.current = parsed.session_id;
-              setSessionId(parsed.session_id);
-            }
-
-            if (parsed.token) {
-              fullAccumulated += parsed.token;
-              const words = String(parsed.token).split(/(?<=\s)|(?=\s)/).filter(Boolean);
-              wordQueue.push(...words);
-              if (!dripping) drip();
-            }
-
-            if (parsed.sources) {
-              setMessages((prev) => prev.map((m) => (m.id === assistantId ? { ...m, sources: parsed.sources } : m)));
+            const signal = JSON.parse(rawForControl.slice(13));
+            if (signal.type === "tool_activate") {
+              setActiveTool(signal.tool as ToolKey);
+              setToolData(signal.tool_data || {});
+              setSuggestedTool(null);
+            } else if (signal.type === "tool_suggest") {
+              setSuggestedTool(signal.tool || null);
             }
           } catch {
-            // BA orchestrator streams plain text tokens as raw SSE data.
-            fullAccumulated += raw;
-            const words = String(raw).split(/(?<=\s)|(?=\s)/).filter(Boolean);
+            // ignore malformed tool signals
+          }
+          return;
+        }
+
+        try {
+          const parsed = JSON.parse(rawForControl);
+          if (parsed.session_id && !sessionIdRef.current) {
+            sessionIdRef.current = parsed.session_id;
+            setSessionId(parsed.session_id);
+          }
+
+          if (parsed.token !== undefined && parsed.token !== null) {
+            const tokenText = String(parsed.token);
+            fullAccumulated += tokenText;
+            const words = tokenText.split(/(?<=\s)|(?=\s)/).filter(Boolean);
             wordQueue.push(...words);
             if (!dripping) drip();
           }
+
+          if (parsed.sources) {
+            setMessages((prev) => prev.map((m) => (m.id === assistantId ? { ...m, sources: parsed.sources } : m)));
+          }
+        } catch {
+          // BA orchestrator streams plain text tokens as raw SSE data.
+          fullAccumulated += raw;
+          const words = raw.split(/(?<=\s)|(?=\s)/).filter(Boolean);
+          wordQueue.push(...words);
+          if (!dripping) drip();
+        }
+      };
+
+      while (!done) {
+        const { done: streamDone, value } = await reader.read();
+        if (streamDone) {
+          sseBuffer += decoder.decode();
+        } else {
+          const chunk = decoder.decode(value, { stream: true });
+          sseBuffer += chunk;
+        }
+
+        sseBuffer = sseBuffer.replace(/\r\n/g, "\n");
+
+        let boundary = sseBuffer.indexOf("\n\n");
+        while (boundary !== -1) {
+          const eventBlock = sseBuffer.slice(0, boundary);
+          sseBuffer = sseBuffer.slice(boundary + 2);
+
+          const dataLines = eventBlock
+            .split("\n")
+            .filter((line) => line.startsWith("data:"))
+            .map((line) => (line.startsWith("data: ") ? line.slice(6) : line.slice(5)));
+
+          if (dataLines.length > 0) {
+            processSsePayload(dataLines.join("\n"));
+            if (done) break;
+          }
+
+          boundary = sseBuffer.indexOf("\n\n");
+        }
+
+        if (streamDone) {
+          if (!done && sseBuffer.includes("data:")) {
+            const dataLines = sseBuffer
+              .split("\n")
+              .filter((line) => line.startsWith("data:"))
+              .map((line) => (line.startsWith("data: ") ? line.slice(6) : line.slice(5)));
+            if (dataLines.length > 0) {
+              processSsePayload(dataLines.join("\n"));
+            }
+          }
+          break;
         }
       }
 
@@ -930,23 +1860,199 @@ export default function BusinessAnalyticsPage() {
         check();
       });
 
-      setMessages((prev) => prev.map((m) => (m.id === assistantId ? { ...m, content: stripCitations(fullAccumulated) } : m)));
+      setMessages((prev) => prev.map((m) => (m.id === assistantId ? { ...m, content: stripCitations(fullAccumulated), isComplete: true } : m)));
+      await new Promise((resolve) => setTimeout(resolve, 16));
+      setIsStreaming(false);
+      setAbortController(null);
       fetchRecentSessions();
     } catch (err: any) {
       if (err?.name === "AbortError") {
         const abortedContent = stripCitations(fullAccumulated || displayed);
         if (abortedContent) {
-          setMessages((prev) => prev.map((m) => (m.id === assistantId ? { ...m, content: abortedContent } : m)));
+          setMessages((prev) => prev.map((m) => (m.id === assistantId ? { ...m, content: abortedContent, isComplete: true } : m)));
         }
         setIsStreaming(false);
+        setAbortController(null);
         return;
       }
-      setMessages((prev) => prev.map((m) => (m.id === assistantId ? { ...m, content: "Something went wrong. Please try again." } : m)));
-    } finally {
+      setMessages((prev) => prev.map((m) => (m.id === assistantId ? { ...m, content: "Something went wrong. Please try again.", isComplete: true } : m)));
       setIsStreaming(false);
       setAbortController(null);
     }
   }, [API, fetchRecentSessions, sessionId, token]);
+
+  const openCaseStudy = useCallback((study: CaseStudy) => {
+    setFullscreenCase(study);
+    setCaseMessages([]);
+    setCaseInput("");
+    setCaseStreaming(false);
+    caseAbortController?.abort();
+    setCaseAbortController(null);
+  }, [caseAbortController]);
+
+  const sendCaseMessage = useCallback(async (rawMessage?: string) => {
+    if (!token || !fullscreenCase || caseStreaming) return;
+
+    const text = (rawMessage ?? caseInput).trim();
+    if (!text) return;
+
+    const assistantId = crypto.randomUUID();
+    const historyPayload = caseMessages.slice(-6).map((m) => ({
+      role: m.role,
+      content: m.content,
+    }));
+
+    setCaseMessages((prev) => ([
+      ...prev,
+      { id: crypto.randomUUID(), role: "user", content: text, timestamp: new Date().toISOString() },
+      { id: assistantId, role: "assistant", content: "", timestamp: new Date().toISOString() },
+    ]));
+    setCaseInput("");
+    setCaseStreaming(true);
+
+    const controller = new AbortController();
+    setCaseAbortController(controller);
+
+    let fullAccumulated = "";
+    let displayed = "";
+    const wordQueue: string[] = [];
+    let dripping = false;
+    let done = false;
+    let sseBuffer = "";
+
+    const drip = () => {
+      if (wordQueue.length === 0) {
+        dripping = false;
+        return;
+      }
+      dripping = true;
+      const next = wordQueue.shift() || "";
+      displayed += next;
+      setCaseMessages((prev) => prev.map((m) => (m.id === assistantId ? { ...m, content: displayed } : m)));
+      setTimeout(drip, 22);
+    };
+
+    const processSsePayload = (raw: string) => {
+      const rawControl = raw.trim();
+      if (rawControl === "[DONE]") {
+        done = true;
+        return;
+      }
+
+      fullAccumulated += raw;
+      const words = raw.split(/(?<=\s)|(?=\s)/).filter(Boolean);
+      wordQueue.push(...words);
+      if (!dripping) drip();
+    };
+
+    try {
+      const res = await fetch(`${API}/ba/tools/case-chat`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        signal: controller.signal,
+        body: JSON.stringify({
+          case_id: fullscreenCase.id,
+          case_company: fullscreenCase.company,
+          case_context: JSON.stringify({
+            the_problem: fullscreenCase.the_problem,
+            ba_techniques: fullscreenCase.ba_techniques,
+            outcome: fullscreenCase.outcome,
+            key_lesson: fullscreenCase.key_lesson,
+          }),
+          message: text,
+          history: historyPayload,
+          session_id: sessionId || "",
+        }),
+      });
+
+      if (!res.ok || !res.body) throw new Error("case chat stream failed");
+
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
+
+      while (!done) {
+        const { done: streamDone, value } = await reader.read();
+        if (streamDone) {
+          sseBuffer += decoder.decode();
+        } else {
+          sseBuffer += decoder.decode(value, { stream: true });
+        }
+
+        sseBuffer = sseBuffer.replace(/\r\n/g, "\n");
+
+        let boundary = sseBuffer.indexOf("\n\n");
+        while (boundary !== -1) {
+          const eventBlock = sseBuffer.slice(0, boundary);
+          sseBuffer = sseBuffer.slice(boundary + 2);
+
+          const dataLines = eventBlock
+            .split("\n")
+            .filter((line) => line.startsWith("data:"))
+            .map((line) => (line.startsWith("data: ") ? line.slice(6) : line.slice(5)));
+
+          if (dataLines.length > 0) {
+            processSsePayload(dataLines.join("\n"));
+            if (done) break;
+          }
+
+          boundary = sseBuffer.indexOf("\n\n");
+        }
+
+        if (streamDone) {
+          if (!done && sseBuffer.includes("data:")) {
+            const dataLines = sseBuffer
+              .split("\n")
+              .filter((line) => line.startsWith("data:"))
+              .map((line) => (line.startsWith("data: ") ? line.slice(6) : line.slice(5)));
+            if (dataLines.length > 0) {
+              processSsePayload(dataLines.join("\n"));
+            }
+          }
+          break;
+        }
+      }
+
+      await new Promise<void>((resolve) => {
+        const check = () => {
+          if (wordQueue.length === 0 && !dripping) {
+            resolve();
+          } else {
+            setTimeout(check, 50);
+          }
+        };
+        check();
+      });
+
+      setCaseMessages((prev) => prev.map((m) => (m.id === assistantId ? { ...m, content: fullAccumulated, isComplete: true } : m)));
+      await new Promise((resolve) => setTimeout(resolve, 16));
+      setCaseStreaming(false);
+      setCaseAbortController(null);
+    } catch (err: any) {
+      if (err?.name === "AbortError") {
+        const abortedContent = fullAccumulated || displayed;
+        if (abortedContent) {
+          setCaseMessages((prev) => prev.map((m) => (m.id === assistantId ? { ...m, content: abortedContent, isComplete: true } : m)));
+        }
+        setCaseStreaming(false);
+        setCaseAbortController(null);
+        return;
+      } else {
+        setCaseMessages((prev) => prev.map((m) => (m.id === assistantId ? { ...m, content: "Something went wrong. Please try again.", isComplete: true } : m)));
+        setCaseStreaming(false);
+        setCaseAbortController(null);
+      }
+    }
+  }, [API, caseInput, caseMessages, caseStreaming, fullscreenCase, sessionId, token]);
+
+  const handleCaseInputKeyDown = useCallback(async (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    if (e.key === "Enter" && !e.shiftKey) {
+      e.preventDefault();
+      await sendCaseMessage();
+    }
+  }, [sendCaseMessage]);
 
   const commitEditedMessage = useCallback(async () => {
     if (isStreaming || !editingMessageId) return;
@@ -1306,6 +2412,12 @@ export default function BusinessAnalyticsPage() {
     return `${value.slice(0, 28)}...`;
   }, []);
 
+  const complexityMeta: Record<"basic" | "intermediate" | "advanced", { line: string; pillBg: string; pillText: string }> = {
+    basic: { line: "#059669", pillBg: "rgba(5,150,105,0.18)", pillText: "#34d399" },
+    intermediate: { line: "#d97706", pillBg: "rgba(217,119,6,0.18)", pillText: "#fbbf24" },
+    advanced: { line: "#7c3aed", pillBg: "rgba(124,58,237,0.18)", pillText: "#c4b5fd" },
+  };
+
   if (!mounted) {
     return (
       <div style={{
@@ -1656,7 +2768,7 @@ export default function BusinessAnalyticsPage() {
             ) : (
               <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
                 {messages.map((m, idx) => {
-                  const isCurrentlyStreaming = isStreaming && m.role === "assistant" && idx === messages.length - 1;
+                  const isCurrentlyStreaming = isStreaming && m.role === "assistant" && idx === messages.length - 1 && !m.isComplete;
                   const isHovered = hoveredMessageId === m.id;
                   const copyKey = `${m.id}-copy`;
                   const copied = copiedId === copyKey;
@@ -2341,67 +3453,49 @@ export default function BusinessAnalyticsPage() {
 
               {activeTool === "case" && (
                 <div>
-                  <div style={{ display: "flex", gap: 8, overflowX: "auto", marginBottom: 12, paddingBottom: 4 }}>
-                    {CASE_STUDIES.map((c, idx) => (
-                      <button
-                        key={c.company}
-                        onClick={() => setCaseIndex(idx)}
-                        style={{ border: `1px solid ${caseIndex === idx ? COLORS.primary : COLORS.border}`, background: caseIndex === idx ? COLORS.primary : COLORS.surfaceRaised, color: caseIndex === idx ? "#fff" : COLORS.textSecondary, borderRadius: 20, padding: "7px 12px", fontSize: 12, cursor: "pointer", whiteSpace: "nowrap" }}
-                      >
-                        {c.company}
-                      </button>
-                    ))}
+                  <div style={{ color: COLORS.textSecondary, fontSize: 12, marginBottom: 10 }}>
+                    Explore real business analytics stories and open any case in immersive mode.
                   </div>
+                  <div style={{ display: "grid", gap: 10 }}>
+                    {CASE_STUDIES.map((study) => (
+                      <div key={study.id} style={{ background: COLORS.surfaceRaised, border: `1px solid ${COLORS.border}`, borderRadius: 12, padding: 12 }}>
+                        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, marginBottom: 8 }}>
+                          <div style={{ display: "flex", alignItems: "center", gap: 10, minWidth: 0 }}>
+                            <div style={{ width: 32, height: 32, borderRadius: "50%", background: study.unit_color, color: "#fff", fontSize: 13, fontWeight: 700, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+                              {study.logo_letter}
+                            </div>
+                            <div style={{ minWidth: 0 }}>
+                              <div style={{ fontSize: 14, fontWeight: 700, color: COLORS.textPrimary, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{study.company}</div>
+                              <div style={{ fontSize: 11, color: COLORS.textMuted, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{study.industry}</div>
+                            </div>
+                          </div>
+                          <span style={{ fontSize: 10, color: COLORS.textMuted, border: `1px solid ${COLORS.border}`, borderRadius: 999, padding: "3px 7px" }}>{study.year}</span>
+                        </div>
 
-                  <div style={{ background: COLORS.surfaceRaised, border: `1px solid ${COLORS.border}`, borderRadius: 10, padding: 14 }}>
-                    <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 12 }}>
-                      <div style={{ fontSize: 18, fontWeight: 700, color: COLORS.textPrimary }}>{CASE_STUDIES[caseIndex].company}</div>
-                      <span style={{ background: COLORS.border, color: COLORS.textSecondary, fontSize: 11, borderRadius: 4, padding: "2px 8px" }}>{CASE_STUDIES[caseIndex].industry}</span>
-                    </div>
+                        <div style={{ fontSize: 12, color: COLORS.textSecondary, marginBottom: 8, lineHeight: 1.5 }}>{study.tagline}</div>
 
-                    <div style={{ marginBottom: 10 }}>
-                      <div style={{ color: COLORS.textSecondary, fontSize: 12, marginBottom: 4 }}>The Challenge</div>
-                      <div style={{ color: COLORS.textPrimary, fontSize: 13, lineHeight: 1.6 }}>{CASE_STUDIES[caseIndex].challenge}</div>
-                    </div>
+                        <div style={{ background: "#111118", border: `1px solid ${COLORS.border}`, borderRadius: 10, padding: "10px 12px", marginBottom: 8 }}>
+                          <div style={{ color: study.unit_color, fontSize: 22, fontWeight: 800, lineHeight: 1 }}>{study.hero_metric.value}</div>
+                          <div style={{ color: COLORS.textPrimary, fontSize: 12, fontWeight: 600, marginTop: 4 }}>{study.hero_metric.label}</div>
+                          <div style={{ color: COLORS.textMuted, fontSize: 11, marginTop: 2 }}>{study.hero_metric.context}</div>
+                        </div>
 
-                    <div style={{ marginBottom: 10 }}>
-                      <div style={{ color: COLORS.textSecondary, fontSize: 12, marginBottom: 4 }}>Data Used</div>
-                      {CASE_STUDIES[caseIndex].data_used.map((item) => <div key={item} style={{ color: COLORS.textPrimary, fontSize: 13, marginBottom: 3 }}>• {item}</div>)}
-                    </div>
+                        <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginBottom: 10 }}>
+                          {study.ba_techniques.slice(0, 3).map((tech) => (
+                            <span key={`${study.id}-${tech.name}`} style={{ fontSize: 10, color: "#ddd6fe", background: "rgba(124,58,237,0.18)", border: `1px solid ${COLORS.primary}`, borderRadius: 999, padding: "3px 8px" }}>
+                              {tech.name}
+                            </span>
+                          ))}
+                        </div>
 
-                    <div style={{ marginBottom: 10 }}>
-                      <div style={{ color: COLORS.textSecondary, fontSize: 12, marginBottom: 6 }}>BA Techniques Applied</div>
-                      <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
-                        {CASE_STUDIES[caseIndex].ba_techniques.map((item) => <span key={item} style={{ fontSize: 11, color: "#ddd6fe", background: "rgba(124,58,237,0.22)", border: `1px solid ${COLORS.primary}`, borderRadius: 999, padding: "3px 8px" }}>{item}</span>)}
-                      </div>
-                    </div>
-
-                    <div style={{ marginBottom: 10 }}>
-                      <div style={{ color: COLORS.textSecondary, fontSize: 12, marginBottom: 4 }}>The Decision</div>
-                      <div style={{ color: COLORS.textPrimary, fontSize: 13, lineHeight: 1.6 }}>{CASE_STUDIES[caseIndex].decision}</div>
-                    </div>
-
-                    <div style={{ marginBottom: 12 }}>
-                      <div style={{ color: COLORS.textSecondary, fontSize: 12, marginBottom: 4 }}>Outcome</div>
-                      <div style={{ color: COLORS.success, fontSize: 13, lineHeight: 1.6 }}>{CASE_STUDIES[caseIndex].outcome}</div>
-                    </div>
-
-                    <div style={{ color: COLORS.primary, fontSize: 12, fontWeight: 600, marginBottom: 6 }}>Discuss with AI →</div>
-                    <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
-                      {CASE_STUDIES[caseIndex].discussion_questions.map((q) => (
                         <button
-                          key={q}
-                          onClick={async () => {
-                            await doSendMessage(q);
-                            setActiveTool(null);
-                            setTimeout(() => textareaRef.current?.focus(), 0);
-                          }}
-                          style={{ background: COLORS.bg, border: `1px solid ${COLORS.border}`, color: COLORS.textSecondary, borderRadius: 16, padding: "7px 10px", fontSize: 12, textAlign: "left", cursor: "pointer" }}
+                          onClick={() => openCaseStudy(study)}
+                          style={{ width: "100%", border: `1px solid ${COLORS.border}`, background: COLORS.bg, color: COLORS.textPrimary, borderRadius: 8, padding: "8px 10px", fontSize: 12, fontWeight: 600, cursor: "pointer", textAlign: "left" }}
                         >
-                          {q}
+                          Open Case →
                         </button>
-                      ))}
-                    </div>
+                      </div>
+                    ))}
                   </div>
                 </div>
               )}
@@ -2573,6 +3667,222 @@ export default function BusinessAnalyticsPage() {
           </>
         )}
       </div>
+
+      {fullscreenCase && (
+        <div style={{ position: "fixed", inset: 0, zIndex: 300, background: COLORS.bg, animation: "slideUp 0.25s ease", display: "flex", flexDirection: "column" }}>
+          {isMobile && (
+            <div style={{ height: 48, display: "flex", borderBottom: `1px solid ${COLORS.border}`, background: COLORS.sidebar }}>
+              <button
+                onClick={() => setCaseMobileTab("case")}
+                style={{ flex: 1, border: "none", background: "transparent", color: caseMobileTab === "case" ? COLORS.textPrimary : COLORS.textMuted, fontSize: 13, fontWeight: 600, borderBottom: caseMobileTab === "case" ? `2px solid ${COLORS.primary}` : "2px solid transparent", cursor: "pointer" }}
+              >
+                Case
+              </button>
+              <button
+                onClick={() => setCaseMobileTab("chat")}
+                style={{ flex: 1, border: "none", background: "transparent", color: caseMobileTab === "chat" ? COLORS.textPrimary : COLORS.textMuted, fontSize: 13, fontWeight: 600, borderBottom: caseMobileTab === "chat" ? `2px solid ${COLORS.primary}` : "2px solid transparent", cursor: "pointer" }}
+              >
+                Ask AI
+              </button>
+            </div>
+          )}
+
+          <div style={{ flex: 1, minHeight: 0, display: "flex" }}>
+            <div style={{ width: isMobile ? "100%" : "58%", display: !isMobile || caseMobileTab === "case" ? "flex" : "none", flexDirection: "column", borderRight: isMobile ? "none" : `1px solid ${COLORS.border}` }}>
+              <div style={{ height: 56, background: COLORS.sidebar, borderBottom: `1px solid ${COLORS.border}`, padding: "0 16px", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12 }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 10, minWidth: 0 }}>
+                  <div style={{ width: 40, height: 40, borderRadius: "50%", background: fullscreenCase.unit_color, color: "#fff", fontWeight: 700, fontSize: 18, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+                    {fullscreenCase.logo_letter}
+                  </div>
+                  <div style={{ minWidth: 0 }}>
+                    <div style={{ fontSize: 18, fontWeight: 700, color: COLORS.textPrimary, lineHeight: 1.2 }}>{fullscreenCase.company}</div>
+                    <div style={{ display: "flex", gap: 6, marginTop: 3, flexWrap: "wrap" }}>
+                      <span style={{ background: COLORS.surfaceRaised, border: `1px solid ${COLORS.border}`, color: COLORS.textSecondary, fontSize: 10, borderRadius: 999, padding: "2px 8px" }}>{fullscreenCase.industry}</span>
+                      <span style={{ background: COLORS.surfaceRaised, border: `1px solid ${COLORS.border}`, color: COLORS.textSecondary, fontSize: 10, borderRadius: 999, padding: "2px 8px" }}>{fullscreenCase.country}</span>
+                    </div>
+                  </div>
+                </div>
+                <button
+                  onClick={() => {
+                    caseAbortController?.abort();
+                    setCaseAbortController(null);
+                    setCaseStreaming(false);
+                    setFullscreenCase(null);
+                  }}
+                  style={{ width: 36, height: 36, border: "none", borderRadius: 8, background: "transparent", color: COLORS.textMuted, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}
+                >
+                  <Icon name="close" size={20} color="currentColor" />
+                </button>
+              </div>
+
+              <div style={{ flex: 1, minHeight: 0, overflowY: "auto", paddingBottom: 40 }}>
+                <div style={{ margin: 16, borderRadius: 12, border: `1px solid ${fullscreenCase.unit_color}44`, background: `linear-gradient(135deg, ${fullscreenCase.unit_color}22, ${fullscreenCase.unit_color}08)`, padding: 20 }}>
+                  <div style={{ fontSize: isMobile ? 36 : 48, fontWeight: 800, color: fullscreenCase.unit_color, lineHeight: 1 }}>{fullscreenCase.hero_metric.value}</div>
+                  <div style={{ marginTop: 8, fontSize: 16, fontWeight: 600, color: COLORS.textPrimary }}>{fullscreenCase.hero_metric.label}</div>
+                  <div style={{ marginTop: 4, fontSize: 13, color: COLORS.textSecondary, fontStyle: "italic" }}>{fullscreenCase.hero_metric.context}</div>
+                </div>
+
+                <div style={{ padding: "0 24px", marginBottom: 24 }}>
+                  <div style={{ fontSize: isMobile ? 18 : 20, fontFamily: "Newsreader, Georgia, serif", fontStyle: "italic", color: COLORS.textPrimary }}>{fullscreenCase.tagline}</div>
+                </div>
+
+                <div style={{ padding: "0 24px" }}>
+                  <div style={{ background: `${fullscreenCase.unit_color}22`, color: fullscreenCase.unit_color, fontSize: 11, fontWeight: 700, letterSpacing: "0.08em", padding: "3px 10px", borderRadius: 20, display: "inline-block" }}>THE PROBLEM</div>
+                  <div style={{ fontSize: 14, color: "#c0c0d0", lineHeight: 1.8, padding: "12px 0" }}>{fullscreenCase.the_problem}</div>
+
+                  <div style={{ marginTop: 8, background: `${fullscreenCase.unit_color}22`, color: fullscreenCase.unit_color, fontSize: 11, fontWeight: 700, letterSpacing: "0.08em", padding: "3px 10px", borderRadius: 20, display: "inline-block" }}>DATA USED</div>
+                  <div style={{ marginTop: 12, display: "grid", gridTemplateColumns: isMobile ? "1fr" : "repeat(3, minmax(0, 1fr))", gap: 10 }}>
+                    {fullscreenCase.data_used.map((d) => (
+                      <div key={`${fullscreenCase.id}-${d.type}`} style={{ background: COLORS.surface, border: `1px solid ${COLORS.border}`, borderRadius: 10, padding: 14 }}>
+                        <div style={{ fontSize: 13, fontWeight: 600, color: COLORS.textPrimary }}>{d.type}</div>
+                        <div style={{ marginTop: 4, fontSize: 11, color: COLORS.primary, fontWeight: 600 }}>{d.volume}</div>
+                        <div style={{ marginTop: 6, fontSize: 12, color: COLORS.textSecondary, fontStyle: "italic", lineHeight: 1.5 }}>{d.insight}</div>
+                      </div>
+                    ))}
+                  </div>
+
+                  <div style={{ marginTop: 18, background: `${fullscreenCase.unit_color}22`, color: fullscreenCase.unit_color, fontSize: 11, fontWeight: 700, letterSpacing: "0.08em", padding: "3px 10px", borderRadius: 20, display: "inline-block" }}>BA TECHNIQUES</div>
+                  <div style={{ marginTop: 12 }}>
+                    {fullscreenCase.ba_techniques.map((tech) => {
+                      const meta = complexityMeta[tech.complexity];
+                      return (
+                        <div key={`${fullscreenCase.id}-${tech.name}`} style={{ position: "relative", background: COLORS.surfaceRaised, borderLeft: `3px solid ${meta.line}`, borderRadius: "0 8px 8px 0", padding: "12px 14px", marginBottom: 8 }}>
+                          <div style={{ fontSize: 13, fontWeight: 600, color: COLORS.textPrimary }}>{tech.name}</div>
+                          <span style={{ position: "absolute", top: 10, right: 10, fontSize: 10, textTransform: "capitalize", background: meta.pillBg, color: meta.pillText, borderRadius: 999, padding: "2px 7px" }}>{tech.complexity}</span>
+                          <div style={{ marginTop: 6, fontSize: 12, color: COLORS.textSecondary, lineHeight: 1.5, paddingRight: 66 }}>{tech.description}</div>
+                        </div>
+                      );
+                    })}
+                  </div>
+
+                  <div style={{ marginTop: 12, background: `${fullscreenCase.unit_color}22`, color: fullscreenCase.unit_color, fontSize: 11, fontWeight: 700, letterSpacing: "0.08em", padding: "3px 10px", borderRadius: 20, display: "inline-block" }}>THE SOLUTION</div>
+                  <div style={{ fontSize: 14, color: "#c0c0d0", lineHeight: 1.8, padding: "12px 0" }}>{fullscreenCase.the_solution}</div>
+
+                  <div style={{ marginTop: 8, background: `${fullscreenCase.unit_color}22`, color: fullscreenCase.unit_color, fontSize: 11, fontWeight: 700, letterSpacing: "0.08em", padding: "3px 10px", borderRadius: 20, display: "inline-block" }}>OUTCOMES</div>
+                  <div style={{ marginTop: 12, display: "flex", gap: 10, overflowX: isMobile ? "auto" : "visible" }}>
+                    {fullscreenCase.outcome.map((o, idx) => (
+                      <div key={`${fullscreenCase.id}-outcome-${idx}`} style={{ minWidth: isMobile ? 190 : 0, flex: isMobile ? "0 0 auto" : 1, background: COLORS.surface, border: `1px solid ${COLORS.border}`, borderRadius: 10, padding: 14, textAlign: "center" }}>
+                        <div style={{ fontSize: 11, color: COLORS.textSecondary, textTransform: "uppercase", letterSpacing: "0.08em" }}>{o.metric}</div>
+                        <div style={{ marginTop: 8, fontSize: 20, fontWeight: 800, color: fullscreenCase.unit_color }}>{o.result}</div>
+                        <div style={{ marginTop: 6, fontSize: 11, color: COLORS.textMuted, fontStyle: "italic" }}>{o.timeframe}</div>
+                      </div>
+                    ))}
+                  </div>
+
+                  <div style={{ marginTop: 18, color: fullscreenCase.unit_color, fontSize: 11, fontWeight: 700, letterSpacing: "0.08em" }}>KEY LESSON</div>
+                  <div style={{ marginTop: 6, background: `${fullscreenCase.unit_color}11`, border: `1px solid ${fullscreenCase.unit_color}33`, borderLeft: `4px solid ${fullscreenCase.unit_color}`, borderRadius: "0 10px 10px 0", padding: "16px 20px", fontSize: 14, color: COLORS.textPrimary, lineHeight: 1.7 }}>
+                    {fullscreenCase.key_lesson}
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div style={{ width: isMobile ? "100%" : "42%", display: !isMobile || caseMobileTab === "chat" ? "flex" : "none", flexDirection: "column" }}>
+              <div style={{ height: 56, borderBottom: `1px solid ${COLORS.border}`, background: COLORS.sidebar, padding: "0 16px", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                  <span style={{ width: 8, height: 8, borderRadius: 999, background: COLORS.primary, animation: caseStreaming ? "pulse 1.2s ease-in-out infinite" : "none" }} />
+                  <span style={{ color: COLORS.textPrimary, fontSize: 14, fontWeight: 600 }}>Ask about this case</span>
+                </div>
+              </div>
+
+              <div style={{ flex: 1, minHeight: 0, display: "flex", flexDirection: "column", position: "relative" }}>
+                <div ref={caseMessagesScrollRef} style={{ flex: 1, overflowY: "auto", padding: "14px 14px 120px" }}>
+                  {caseMessages.length === 0 ? (
+                    <div>
+                      <div style={{ color: COLORS.textMuted, fontSize: 12, marginBottom: 8 }}>Suggested questions</div>
+                      {fullscreenCase.discussion_starters.map((starter) => (
+                        <button
+                          key={starter}
+                          onClick={async () => {
+                            setCaseInput(starter);
+                            await sendCaseMessage(starter);
+                          }}
+                          style={{ width: "100%", background: COLORS.surface, border: `1px solid ${COLORS.border}`, borderRadius: 8, padding: "10px 14px", marginBottom: 8, cursor: "pointer", fontSize: 13, color: COLORS.textSecondary, lineHeight: 1.5, textAlign: "left" }}
+                          onMouseEnter={(e) => {
+                            e.currentTarget.style.borderColor = COLORS.primary;
+                            e.currentTarget.style.color = COLORS.textPrimary;
+                            e.currentTarget.style.background = COLORS.surfaceRaised;
+                          }}
+                          onMouseLeave={(e) => {
+                            e.currentTarget.style.borderColor = COLORS.border;
+                            e.currentTarget.style.color = COLORS.textSecondary;
+                            e.currentTarget.style.background = COLORS.surface;
+                          }}
+                        >
+                          {starter}
+                        </button>
+                      ))}
+                      <div style={{ color: COLORS.textMuted, fontSize: 11, textAlign: "center", marginTop: 12 }}>— or ask anything —</div>
+                    </div>
+                  ) : (
+                    <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+                      {caseMessages.map((m, idx) => {
+                        const isStreamingAssistant = caseStreaming && m.role === "assistant" && idx === caseMessages.length - 1 && !m.isComplete;
+                        if (m.role === "user") {
+                          return (
+                            <div key={m.id} style={{ display: "flex", flexDirection: "column", alignItems: "flex-end" }}>
+                              <div style={{ fontSize: 11, color: COLORS.textSecondary, marginBottom: 4 }}>You · {timeLabel(m.timestamp)}</div>
+                              <div style={{ maxWidth: "85%", background: COLORS.primary, color: "#fff", borderRadius: "16px 16px 4px 16px", padding: "10px 14px", fontSize: 13.5, lineHeight: 1.6, whiteSpace: "pre-wrap" }}>{m.content}</div>
+                            </div>
+                          );
+                        }
+
+                        return (
+                          <div key={m.id} style={{ display: "flex", flexDirection: "column", alignItems: "flex-start" }}>
+                            <div style={{ fontSize: 11, color: COLORS.textMuted, marginBottom: 4 }}>Case AI · {timeLabel(m.timestamp)}</div>
+                            <div style={{ maxWidth: "92%", background: COLORS.surfaceRaised, color: COLORS.textPrimary, borderRadius: "16px 16px 16px 4px", padding: "12px 14px", border: `1px solid ${COLORS.border}`, fontSize: 13.5, lineHeight: 1.6 }}>
+                              {isStreamingAssistant ? (
+                                <div style={{ whiteSpace: "pre-wrap", wordBreak: "break-word" }}>{m.content}</div>
+                              ) : (
+                                <MessageMarkdown content={m.content} isStreaming={false} />
+                              )}
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+                  <div ref={caseMessagesEndRef} />
+                </div>
+
+                <div style={{ position: "absolute", left: 0, right: 0, bottom: 0, borderTop: `1px solid ${COLORS.border}`, background: COLORS.bg, padding: isMobile ? "8px 10px calc(8px + env(safe-area-inset-bottom))" : "8px 10px" }}>
+                  <div style={{ background: COLORS.surfaceRaised, border: `1px solid ${COLORS.border}`, borderRadius: 10, padding: "6px 10px", display: "flex", alignItems: "center", gap: 8 }}>
+                    <textarea
+                      ref={caseTextareaRef}
+                      value={caseInput}
+                      onChange={(e) => setCaseInput(e.target.value)}
+                      onKeyDown={handleCaseInputKeyDown}
+                      placeholder="Ask anything about this case..."
+                      style={{ flex: 1, background: "transparent", border: "none", outline: "none", color: COLORS.textPrimary, fontSize: 12.5, fontFamily: "Manrope, sans-serif", resize: "none", minHeight: 18, maxHeight: 90, lineHeight: 1.45 }}
+                    />
+
+                    {caseStreaming ? (
+                      <button
+                        onClick={() => {
+                          caseAbortController?.abort();
+                          setCaseStreaming(false);
+                          setCaseAbortController(null);
+                        }}
+                        style={{ width: 34, height: 34, border: "none", borderRadius: 999, background: COLORS.error, color: "#fff", display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer" }}
+                      >
+                        <Icon name="stop" size={18} color="#fff" />
+                      </button>
+                    ) : (
+                      <button
+                        onClick={async () => sendCaseMessage()}
+                        disabled={!caseInput.trim()}
+                        style={{ width: 30, height: 30, border: "none", borderRadius: 999, background: caseInput.trim() ? COLORS.primary : COLORS.border, color: caseInput.trim() ? "#fff" : COLORS.textMuted, display: "flex", alignItems: "center", justifyContent: "center", cursor: caseInput.trim() ? "pointer" : "not-allowed" }}
+                      >
+                        <Icon name="arrow_upward" size={18} color={caseInput.trim() ? "#fff" : COLORS.textMuted} />
+                      </button>
+                    )}
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

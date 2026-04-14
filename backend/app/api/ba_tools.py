@@ -40,6 +40,9 @@ def _require_ba(current_user=Depends(get_current_user)):
     return current_user
 
 
+require_ba = _require_ba
+
+
 def _get_gemini() -> genai.GenerativeModel:
     genai.configure(api_key=os.environ["GEMINI_API_KEY"])
     return genai.GenerativeModel(
@@ -342,3 +345,85 @@ Keep what_you_know encouraging and relatable.
         return _extract_json_payload(getattr(response, "text", "") or "")
     except Exception as exc:
         raise HTTPException(status_code=500, detail=str(exc))
+
+
+class CaseChatRequest(BaseModel):
+    case_id: str
+    case_company: str
+    case_context: str
+    message: str
+    history: list
+    session_id: str
+
+
+@router.post("/case-chat")
+async def case_chat(
+    body: CaseChatRequest,
+    current_user=Depends(require_ba),
+):
+    _ = current_user
+    genai.configure(api_key=os.environ["GEMINI_API_KEY"])
+    model_name = os.environ.get("GEMINI_MODEL", "gemini-3.1-flash-lite-preview")
+
+    system_prompt = f"""You are a Business Analytics tutor
+discussing a specific case study with a university student.
+
+Case: {body.case_company}
+Case context: {body.case_context}
+
+Your role:
+- Answer questions ONLY in the context of this case study
+- Connect answers to specific BA techniques and data from the case
+- Use the actual numbers and metrics from the case in your answers
+- When asked for calculations, work through them step by step
+- Challenge the student to think critically, not just recall facts
+- If asked something outside this case, bring it back:
+  "In the context of {body.case_company}..."
+- Keep answers focused and under 200 words unless calculation
+  requires more space
+- NEVER introduce yourself or say "Great question"
+- Start your answer immediately
+
+Format: use markdown. Use $formula$ for inline math.
+Be direct, specific, and educational."""
+
+    history_text = ""
+    for msg in body.history[-6:]:
+        role = "Student" if msg.get("role") == "user" else "Tutor"
+        history_text += f"{role}: {msg.get('content', '')[:300]}\n"
+
+    user_prompt = f"""{history_text}
+Student: {body.message}"""
+
+    model = genai.GenerativeModel(
+        model_name=model_name,
+        system_instruction=system_prompt,
+    )
+
+    def generate():
+        try:
+            response = model.generate_content(
+                user_prompt,
+                stream=True,
+                generation_config=genai.types.GenerationConfig(
+                    temperature=0.7,
+                    max_output_tokens=800,
+                ),
+            )
+            for chunk in response:
+                if chunk.text:
+                    yield f"data: {chunk.text}\n\n"
+            yield "data: [DONE]\n\n"
+        except Exception as e:
+            yield f"data: Error: {str(e)}\n\n"
+            yield "data: [DONE]\n\n"
+
+    from fastapi.responses import StreamingResponse as SR
+    return SR(
+        generate(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "X-Accel-Buffering": "no",
+        },
+    )
