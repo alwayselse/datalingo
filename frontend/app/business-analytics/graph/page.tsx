@@ -11,7 +11,7 @@ declare global {
 }
 
 type UnitId = 1 | 2 | 3 | 4;
-type UnitFilter = "all" | UnitId;
+type UnitFilter = "all" | "1" | "2" | "3" | "4";
 type MasteryState = "locked" | "unassessed" | "explored" | "intermediate" | "advanced";
 
 interface TopicDef {
@@ -386,6 +386,13 @@ function getTopicLabel(topicId: string) {
   return SHORT_LABELS[topicId] ?? topicId;
 }
 
+function toUnitFromFilter(filter: UnitFilter): UnitId | null {
+  if (filter === "all") return null;
+  const asNum = Number(filter);
+  if (asNum >= 1 && asNum <= 4) return asNum as UnitId;
+  return null;
+}
+
 function materialIconStyle(size: number, color = "#8b8b9e") {
   return {
     fontFamily: "Material Symbols Outlined",
@@ -408,12 +415,12 @@ function getStateVisual(topic: TopicMerged) {
 
   if (topic.state === "locked") {
     return {
-      radius: 4,
+      radius: 3.7,
       color: "#1a1a24",
-      opacity: 0.25,
+      opacity: 0.18,
       glow: 0,
       wireframe: false,
-      labelColor: "#2a2a3a",
+      labelColor: "#272736",
       pulse: false,
       particles: false,
       crown: false,
@@ -423,12 +430,12 @@ function getStateVisual(topic: TopicMerged) {
 
   if (topic.state === "unassessed") {
     return {
-      radius: 4,
-      color: "#2a2a3a",
-      opacity: 0.4,
+      radius: 4.2,
+      color: "#3a3a52",
+      opacity: 0.32,
       glow: 0,
       wireframe: true,
-      labelColor: "#4a4a5e",
+      labelColor: "#58597a",
       pulse: false,
       particles: false,
       crown: false,
@@ -438,12 +445,12 @@ function getStateVisual(topic: TopicMerged) {
 
   if (topic.state === "explored") {
     return {
-      radius: 5,
-      color: shadeHex(unitColor, 0.4),
-      opacity: 0.6,
-      glow: 0.3,
+      radius: 5.2,
+      color: shadeHex(unitColor, 0.52),
+      opacity: 0.72,
+      glow: 0.38,
       wireframe: false,
-      labelColor: "#8b8b9e",
+      labelColor: "#9ea0b8",
       pulse: false,
       particles: false,
       crown: false,
@@ -453,12 +460,12 @@ function getStateVisual(topic: TopicMerged) {
 
   if (topic.state === "intermediate") {
     return {
-      radius: 6.5,
-      color: shadeHex(unitColor, 0.7),
-      opacity: 0.85,
-      glow: 0.6,
+      radius: 7.2,
+      color: shadeHex(unitColor, 0.86),
+      opacity: 0.95,
+      glow: 0.92,
       wireframe: false,
-      labelColor: "#f0f0f5",
+      labelColor: "#f5f6ff",
       pulse: true,
       particles: false,
       crown: false,
@@ -467,10 +474,10 @@ function getStateVisual(topic: TopicMerged) {
   }
 
   return {
-    radius: 8,
+    radius: 9.4,
     color: unitColor,
     opacity: 1,
-    glow: 1,
+    glow: 1.35,
     wireframe: false,
     labelColor: "#ffffff",
     pulse: false,
@@ -625,7 +632,45 @@ export default function BAGraphPage() {
 
   useEffect(() => {
     unitFilterRef.current = unitFilter;
-  }, [unitFilter]);
+
+    const activeUnit = toUnitFromFilter(unitFilter);
+
+    Object.entries(nodeMeshMapRef.current).forEach(([topicId, mesh]) => {
+      const topic = topics[topicId];
+      if (!topic || !mesh) return;
+
+      const visibleForUnit = activeUnit === null || topic.unit === activeUnit;
+      mesh.userData.filterTarget = visibleForUnit ? 1 : 0.08;
+
+      const label = labelMapRef.current[topicId];
+      if (label) {
+        label.style.opacity = visibleForUnit ? "1" : "0.12";
+      }
+    });
+
+    edgeItemsRef.current.forEach((edge) => {
+      const sourceTopic = topics[edge.sourceId];
+      const targetTopic = topics[edge.targetId];
+      if (!sourceTopic || !targetTopic) return;
+
+      const visibleForUnit = activeUnit === null || sourceTopic.unit === activeUnit || targetTopic.unit === activeUnit;
+      const edgeFade = visibleForUnit ? 1 : 0.08;
+      const baseOpacity = edge.state === "mastered" ? 0.85 : edge.state === "available" ? 0.5 : 0.3;
+
+      if (edge.line?.material) {
+        edge.line.material.opacity = baseOpacity * edgeFade;
+      }
+      if (edge.dash?.material) {
+        edge.dash.material.opacity = 0.9 * edgeFade;
+      }
+      if (edge.particles?.length) {
+        edge.particles.forEach((particle) => {
+          particle.visible = edgeFade > 0.09;
+          particle.material.opacity = 0.85 * edgeFade;
+        });
+      }
+    });
+  }, [unitFilter, topics]);
 
   useEffect(() => {
     if (isMobile) {
@@ -891,6 +936,7 @@ export default function BAGraphPage() {
           clickable: visual.clickable,
           pulse: visual.pulse,
           filterUnit: topic.unit,
+          filterTarget: 1,
           hoverScale: 1,
           selectedScale: 1,
         };
@@ -914,9 +960,15 @@ export default function BAGraphPage() {
         if (topic.state === "advanced") {
           const core = new THREE.Mesh(
             new THREE.SphereGeometry(visual.radius * 0.42, 18, 18),
-            new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.22 }),
+            new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.34 }),
           );
           mesh.add(core);
+
+          const aura = new THREE.Mesh(
+            new THREE.SphereGeometry(visual.radius * 1.55, 20, 20),
+            new THREE.MeshBasicMaterial({ color: new THREE.Color(UNIT_META[topic.unit].color), transparent: true, opacity: 0.2, side: THREE.BackSide }),
+          );
+          mesh.add(aura);
 
           const orbitGroup = new THREE.Group();
           for (let i = 0; i < 3; i += 1) {
@@ -971,10 +1023,14 @@ export default function BAGraphPage() {
         label.style.fontFamily = "Manrope, sans-serif";
         label.style.fontSize = "11px";
         label.style.color = visual.labelColor;
-        label.style.textShadow = "0 1px 4px rgba(0,0,0,0.8)";
+        label.style.textShadow = "0 2px 8px rgba(0,0,0,0.95), 0 0 1px rgba(0,0,0,0.8)";
         label.style.transform = "translateX(-50%) translateY(-50%)";
         label.style.whiteSpace = "nowrap";
         label.style.fontWeight = topic.state === "advanced" ? "700" : "500";
+        label.style.letterSpacing = "0.01em";
+        label.style.padding = "2px 4px";
+        label.style.borderRadius = "6px";
+        label.style.background = "rgba(10,10,15,0.22)";
         labelsEl.appendChild(label);
         labelMapRef.current[topic.id] = label;
       });
@@ -1243,12 +1299,12 @@ export default function BAGraphPage() {
 
           const mat = mesh.material;
 
-          const filterFactor = unitFilter === "all" || unitFilter === topic.unit ? 1 : 0.1;
+          const filterFactor = Number(mesh.userData.filterTarget ?? 1);
           const targetOpacity = visual.opacity * filterFactor;
           mat.opacity += (targetOpacity - mat.opacity) * 0.1;
 
-            const isHovered = hoveredTopicIdRef.current === topic.id;
-            const isSelected = selectedTopicIdRef.current === topic.id;
+          const isHovered = hoveredTopicIdRef.current === topic.id;
+          const isSelected = selectedTopicIdRef.current === topic.id;
 
           let pulse = 1;
           if (visual.pulse) {
@@ -1271,9 +1327,9 @@ export default function BAGraphPage() {
           }
 
           if (topic.state === "intermediate") {
-            mat.emissiveIntensity = visual.glow + 0.08 * Math.sin(t * 1.5);
+            mat.emissiveIntensity = visual.glow + 0.14 * Math.sin(t * 1.5);
           } else if (topic.state === "advanced") {
-            mat.emissiveIntensity = visual.glow + 0.18 * Math.sin(t * 2);
+            mat.emissiveIntensity = visual.glow + 0.36 * Math.sin(t * 2);
           } else {
             mat.emissiveIntensity = visual.glow;
           }
@@ -1285,20 +1341,25 @@ export default function BAGraphPage() {
 
             const lx = (tmpVec.x * 0.5 + 0.5) * width;
             const ly = (-tmpVec.y * 0.5 + 0.5) * height;
+            const activeFilterUnit = toUnitFromFilter(unitFilterRef.current);
+            const passesFilter = activeFilterUnit === null || topic.unit === activeFilterUnit;
+            const mobileAllowed = !isMobile || isSelected || isHovered || topic.state === "intermediate" || topic.state === "advanced";
 
             label.style.left = `${lx}px`;
             label.style.top = `${ly}px`;
-            const shouldShowLabel = !isMobile || isSelected || isHovered || topic.state === "advanced";
+            const shouldShowLabel = passesFilter && mobileAllowed;
             label.style.display = tmpVec.z > 1 || !shouldShowLabel ? "none" : "block";
 
             if (isHovered || isSelected) {
-              label.style.fontSize = isMobile ? "12px" : "13px";
+              label.style.fontSize = isMobile ? "12px" : "14px";
               label.style.color = COLORS.textPrimary;
               label.style.fontWeight = "700";
+              label.style.background = "rgba(10,10,15,0.72)";
             } else {
-              label.style.fontSize = isMobile ? "10px" : "11px";
+              label.style.fontSize = isMobile ? "10px" : "11.5px";
               label.style.color = visual.labelColor;
               label.style.fontWeight = topic.state === "advanced" ? "700" : "500";
+              label.style.background = "rgba(10,10,15,0.22)";
             }
           }
         });
@@ -1307,8 +1368,8 @@ export default function BAGraphPage() {
           const sourceTopic = topicsRef.current[edge.sourceId];
           const targetTopic = topicsRef.current[edge.targetId];
 
-          const activeFilter = unitFilterRef.current;
-          const fade = activeFilter === "all" || sourceTopic?.unit === activeFilter || targetTopic?.unit === activeFilter ? 1 : 0.08;
+          const activeFilter = toUnitFromFilter(unitFilterRef.current);
+          const fade = activeFilter === null || sourceTopic?.unit === activeFilter || targetTopic?.unit === activeFilter ? 1 : 0.08;
 
           if (edge.line?.material) {
             edge.line.material.opacity += ((edge.state === "mastered" ? 0.85 : edge.state === "available" ? 0.5 : 0.3) * fade - edge.line.material.opacity) * 0.1;
@@ -1543,9 +1604,10 @@ export default function BAGraphPage() {
         {legendOpen && (
           <div style={{ marginTop: 0, background: COLORS.surfaceRaised, border: `1px solid ${COLORS.border}`, borderRadius: 10, padding: 10, width: isMobile ? 168 : 200 }}>
             {[
-              { label: "Unassessed", color: "#4a4a5e" },
-              { label: "Exploring", color: "#8b8b9e" },
-              { label: "Intermediate", color: "#f0f0f5" },
+              { label: "Locked", color: "#272736" },
+              { label: "Unassessed", color: "#58597a" },
+              { label: "Exploring", color: "#9ea0b8" },
+              { label: "Intermediate", color: "#f5f6ff" },
               { label: "Advanced", color: "#ffffff" },
             ].map((item) => (
               <div key={item.label} style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 6 }}>
@@ -1560,13 +1622,13 @@ export default function BAGraphPage() {
       <div style={{ position: "absolute", bottom: isMobile ? 10 : 16, left: "50%", transform: "translateX(-50%)", zIndex: 20, display: "flex", gap: 8, background: "transparent", maxWidth: isMobile ? "94vw" : "none", overflowX: isMobile ? "auto" : "visible", paddingBottom: isMobile ? "env(safe-area-inset-bottom)" : 0 }}>
         {([
           { id: "all", label: "All" },
-          { id: 1, label: "Foundations" },
-          { id: 2, label: "Customer" },
-          { id: 3, label: "Forecasting" },
-          { id: 4, label: "Advanced" },
+          { id: "1", label: "Foundations" },
+          { id: "2", label: "Customer" },
+          { id: "3", label: "Forecasting" },
+          { id: "4", label: "Advanced" },
         ] as Array<{ id: UnitFilter; label: string }>).map((item) => {
           const active = unitFilter === item.id;
-          const activeColor = item.id === "all" ? COLORS.primary : UNIT_META[item.id as UnitId].color;
+          const activeColor = item.id === "all" ? COLORS.primary : UNIT_META[Number(item.id) as UnitId].color;
           return (
             <button
               key={String(item.id)}
@@ -1583,7 +1645,7 @@ export default function BAGraphPage() {
                 whiteSpace: "nowrap",
               }}
             >
-              {isMobile ? (item.id === 1 ? "Fdn" : item.id === 2 ? "Cust" : item.id === 3 ? "Fcast" : item.id === 4 ? "Adv" : "All") : item.label}
+              {isMobile ? (item.id === "1" ? "Fdn" : item.id === "2" ? "Cust" : item.id === "3" ? "Fcast" : item.id === "4" ? "Adv" : "All") : item.label}
             </button>
           );
         })}
