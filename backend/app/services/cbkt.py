@@ -25,11 +25,31 @@ machine_learning, feature_engineering, deep_learning, computer_vision,
 nlp, data_engineering, mlops
 """
 
+BA_TOPIC_LIST = """
+ba_frameworks, customer_data, data_extraction, data_viz_dashboards,
+rfm_analysis, customer_seg_clv, causality_ba, experimental_design,
+ab_testing, pricing_analytics, price_elasticity, promo_optimization,
+time_series_ba, trend_seasonality, forecasting_methods, churn_analytics,
+inventory_control, supply_chain_kpis, text_sentiment, multivariate_testing,
+ethics_bias, data_privacy, ba_capstone
+"""
+
 CLASSIFIER_PROMPT = """You are a topic classifier for a data science learning platform.
 Given a student's question, identify which ONE topic it belongs to from this list:
 {topic_list}
 If the question doesn't clearly belong to any topic, respond with "none".
 Respond with ONLY the topic_id (snake_case), nothing else. Example: "machine_learning" or "none"
+Student question: {query}"""
+
+BA_CLASSIFIER_PROMPT = """You are a topic classifier for a 
+business analytics learning platform.
+Given a student's question, identify which ONE topic it belongs 
+to from this list:
+{topic_list}
+If the question doesn't clearly belong to any topic, respond 
+with "none".
+Respond with ONLY the topic_id (snake_case), nothing else. 
+Example: "rfm_analysis" or "none"
 Student question: {query}"""
 
 MCQ_PROMPT = """You are a data science instructor. Generate 1 multiple choice question to assess a student's understanding of: {topic_name}
@@ -110,13 +130,16 @@ LEVEL_P_KNOWN = {
 }
 
 
-def classify_topic(query: str, user_id: str | None = None) -> str | None:
+def classify_topic(query: str, user_id: str | None = None, course: str | None = None) -> str | None:
     from app.services.logger import log_api_call
     try:
         start = time.time()
+        is_ba = (course or "").lower() == "business_analytics"
+        prompt = BA_CLASSIFIER_PROMPT if is_ba else CLASSIFIER_PROMPT
+        topic_list = BA_TOPIC_LIST if is_ba else TOPIC_LIST
         r = client.chat.completions.create(
             model="llama-3.1-8b-instant",
-            messages=[{"role": "user", "content": CLASSIFIER_PROMPT.format(topic_list=TOPIC_LIST, query=query)}],
+            messages=[{"role": "user", "content": prompt.format(topic_list=topic_list, query=query)}],
             temperature=0.0, max_tokens=20
         )
         log_api_call(user_id=user_id, model="llama-3.1-8b-instant",

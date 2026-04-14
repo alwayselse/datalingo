@@ -466,7 +466,11 @@ def chat(
     # Get message count AFTER saving — used for banner signal
     msg_count = get_message_count_for_session(session_id, db)
 
-    topic_id = classify_topic(clean_message, user_id=user_id)
+    topic_id = classify_topic(
+        clean_message,
+        user_id=user_id,
+        course=user.get("course") or ""
+    )
     is_ba_student = (user.get("course") or "") == "business_analytics"
 
     chunks = []
