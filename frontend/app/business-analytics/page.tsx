@@ -26,6 +26,8 @@ interface UploadedDoc {
   filename: string;
   doc_id?: string;
   collection_id?: string;
+  summary?: string;
+  gemini_file_name?: string;
 }
 
 interface ToolSignalData {
@@ -1321,6 +1323,8 @@ export default function BusinessAnalyticsPage() {
   const [slashFilter, setSlashFilter] = useState("");
   const [uploadedDoc, setUploadedDoc] = useState<UploadedDoc | null>(null);
   const [isUploading, setIsUploading] = useState(false);
+  const [uploadError, setUploadError] = useState<string | null>(null);
+  const [showUploadHint, setShowUploadHint] = useState(false);
   const [showMoreSheet, setShowMoreSheet] = useState(false);
   const [showMobileSidebar, setShowMobileSidebar] = useState(false);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
@@ -1337,6 +1341,7 @@ export default function BusinessAnalyticsPage() {
   const [editingContent, setEditingContent] = useState("");
   const [copiedId, setCopiedId] = useState<string | null>(null);
   const [hoveredMessageId, setHoveredMessageId] = useState<string | null>(null);
+  const [completedIds, setCompletedIds] = useState<Set<string>>(new Set());
 
   const [forgeTopic, setForgeTopic] = useState(BA_TOPICS[0]);
   const [forgeCustomTopic, setForgeCustomTopic] = useState("");
@@ -1348,6 +1353,7 @@ export default function BusinessAnalyticsPage() {
   const [caseMessages, setCaseMessages] = useState<CaseChatMessage[]>([]);
   const [caseInput, setCaseInput] = useState("");
   const [caseStreaming, setCaseStreaming] = useState(false);
+  const [caseCompletedIds, setCaseCompletedIds] = useState<Set<string>>(new Set());
   const [caseAbortController, setCaseAbortController] = useState<AbortController | null>(null);
   const [caseMobileTab, setCaseMobileTab] = useState<"case" | "chat">("case");
 
@@ -1534,11 +1540,13 @@ export default function BusinessAnalyticsPage() {
         content: String(m?.content || ""),
         timestamp: String(m?.created_at || new Date().toISOString()),
         sources: Array.isArray(m?.sources) ? m.sources : [],
+        isComplete: true,
       }));
 
       sessionIdRef.current = sid;
       setSessionId(sid);
       setMessages(mapped);
+      setCompletedIds(new Set(mapped.map((m) => m.id)));
       setActiveTool(null);
     } catch {
       // silent
@@ -1547,6 +1555,7 @@ export default function BusinessAnalyticsPage() {
 
   const startNewChat = useCallback(async () => {
     setMessages([]);
+    setCompletedIds(new Set());
     setInput("");
     setActiveTool(null);
     setToolData({});
@@ -1665,6 +1674,12 @@ export default function BusinessAnalyticsPage() {
     adjustTextareaHeight();
   }, [input, adjustTextareaHeight]);
 
+  useEffect(() => {
+    if (!uploadError) return;
+    const timer = setTimeout(() => setUploadError(null), 4000);
+    return () => clearTimeout(timer);
+  }, [uploadError]);
+
   const handleCopy = useCallback((id: string, text: string) => {
     navigator.clipboard.writeText(text).then(() => {
       setCopiedId(id);
@@ -1688,6 +1703,7 @@ export default function BusinessAnalyticsPage() {
           role: "user",
           content: actualText,
           timestamp: new Date().toISOString(),
+          isComplete: true,
         });
       }
       next.push({
@@ -1860,7 +1876,8 @@ export default function BusinessAnalyticsPage() {
         check();
       });
 
-      setMessages((prev) => prev.map((m) => (m.id === assistantId ? { ...m, content: stripCitations(fullAccumulated), isComplete: true } : m)));
+      setMessages((prev) => prev.map((m) => (m.id === assistantId ? { ...m, content: stripCitations(fullAccumulated) } : m)));
+      setCompletedIds((prev) => new Set([...prev, assistantId]));
       await new Promise((resolve) => setTimeout(resolve, 16));
       setIsStreaming(false);
       setAbortController(null);
@@ -1869,13 +1886,15 @@ export default function BusinessAnalyticsPage() {
       if (err?.name === "AbortError") {
         const abortedContent = stripCitations(fullAccumulated || displayed);
         if (abortedContent) {
-          setMessages((prev) => prev.map((m) => (m.id === assistantId ? { ...m, content: abortedContent, isComplete: true } : m)));
+          setMessages((prev) => prev.map((m) => (m.id === assistantId ? { ...m, content: abortedContent } : m)));
+          setCompletedIds((prev) => new Set([...prev, assistantId]));
         }
         setIsStreaming(false);
         setAbortController(null);
         return;
       }
-      setMessages((prev) => prev.map((m) => (m.id === assistantId ? { ...m, content: "Something went wrong. Please try again.", isComplete: true } : m)));
+      setMessages((prev) => prev.map((m) => (m.id === assistantId ? { ...m, content: "Something went wrong. Please try again." } : m)));
+      setCompletedIds((prev) => new Set([...prev, assistantId]));
       setIsStreaming(false);
       setAbortController(null);
     }
@@ -1884,6 +1903,7 @@ export default function BusinessAnalyticsPage() {
   const openCaseStudy = useCallback((study: CaseStudy) => {
     setFullscreenCase(study);
     setCaseMessages([]);
+    setCaseCompletedIds(new Set());
     setCaseInput("");
     setCaseStreaming(false);
     caseAbortController?.abort();
@@ -2026,7 +2046,8 @@ export default function BusinessAnalyticsPage() {
         check();
       });
 
-      setCaseMessages((prev) => prev.map((m) => (m.id === assistantId ? { ...m, content: fullAccumulated, isComplete: true } : m)));
+      setCaseMessages((prev) => prev.map((m) => (m.id === assistantId ? { ...m, content: fullAccumulated } : m)));
+      setCaseCompletedIds((prev) => new Set([...prev, assistantId]));
       await new Promise((resolve) => setTimeout(resolve, 16));
       setCaseStreaming(false);
       setCaseAbortController(null);
@@ -2034,13 +2055,15 @@ export default function BusinessAnalyticsPage() {
       if (err?.name === "AbortError") {
         const abortedContent = fullAccumulated || displayed;
         if (abortedContent) {
-          setCaseMessages((prev) => prev.map((m) => (m.id === assistantId ? { ...m, content: abortedContent, isComplete: true } : m)));
+          setCaseMessages((prev) => prev.map((m) => (m.id === assistantId ? { ...m, content: abortedContent } : m)));
+          setCaseCompletedIds((prev) => new Set([...prev, assistantId]));
         }
         setCaseStreaming(false);
         setCaseAbortController(null);
         return;
       } else {
-        setCaseMessages((prev) => prev.map((m) => (m.id === assistantId ? { ...m, content: "Something went wrong. Please try again.", isComplete: true } : m)));
+        setCaseMessages((prev) => prev.map((m) => (m.id === assistantId ? { ...m, content: "Something went wrong. Please try again." } : m)));
+        setCaseCompletedIds((prev) => new Set([...prev, assistantId]));
         setCaseStreaming(false);
         setCaseAbortController(null);
       }
@@ -2122,8 +2145,20 @@ export default function BusinessAnalyticsPage() {
       return;
     }
 
+    if (lower.startsWith("/doc")) {
+      const docQuestion = text.slice(4).trim();
+      if (!uploadedDoc) {
+        setUploadError("No document uploaded yet. Use the paperclip to upload a file first.");
+        return;
+      }
+
+      const docMessage = docQuestion ? `[DOC_ONLY] ${docQuestion}` : "[DOC_ONLY] What is this document about?";
+      await doSendMessage(docMessage);
+      return;
+    }
+
     await doSendMessage(text);
-  }, [input, isStreaming, router, doSendMessage]);
+  }, [input, isStreaming, router, doSendMessage, uploadedDoc]);
 
   const selectSlashCommand = useCallback((command: SlashCommand) => {
     if (command.action === "route") {
@@ -2181,17 +2216,20 @@ export default function BusinessAnalyticsPage() {
     if (!token) return;
 
     if (file.size > 20 * 1024 * 1024) {
-      alert("File too large. Max 20MB allowed.");
+      setUploadError("File too large (max 20MB)");
       return;
     }
 
-    const sid = sessionIdRef.current || sessionId;
-    if (!sid) {
-      alert("Session not ready yet. Please try again in a moment.");
-      return;
+    const sid = sessionIdRef.current || sessionId || crypto.randomUUID();
+    if (!sessionIdRef.current) {
+      sessionIdRef.current = sid;
+    }
+    if (!sessionId) {
+      setSessionId(sid);
     }
 
     setIsUploading(true);
+    setUploadError(null);
 
     try {
       const formData = new FormData();
@@ -2206,7 +2244,9 @@ export default function BusinessAnalyticsPage() {
       });
 
       if (!res.ok) {
-        throw new Error("Upload failed");
+        const errorPayload = await res.json().catch(() => ({}));
+        const detail = typeof errorPayload?.detail === "string" ? errorPayload.detail : "Upload failed. Please try again.";
+        throw new Error(detail);
       }
 
       const payload = await res.json().catch(() => ({}));
@@ -2214,14 +2254,32 @@ export default function BusinessAnalyticsPage() {
         filename: payload.filename || file.name,
         doc_id: payload.doc_id,
         collection_id: payload.collection_id,
+        summary: payload.summary,
+        gemini_file_name: payload.gemini_file_name,
       });
-    } catch {
-      alert("Upload failed. Please try again.");
+    } catch (error: any) {
+      setUploadError(error?.message || "Upload failed. Please try again.");
     } finally {
       setIsUploading(false);
       if (fileInputRef.current) fileInputRef.current.value = "";
     }
   }, [API, token, sessionId]);
+
+  const removeDocument = useCallback(async () => {
+    if (!sessionId || !token) {
+      setUploadedDoc(null);
+      return;
+    }
+    try {
+      await fetch(`${API}/ba/documents/active?session_id=${sessionId}`, {
+        method: "DELETE",
+        headers: { Authorization: `Bearer ${token}` },
+      });
+    } catch {
+      // Keep silent by design; local state still clears.
+    }
+    setUploadedDoc(null);
+  }, [API, sessionId, token]);
 
   const handlePickFile = useCallback(async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -2714,13 +2772,35 @@ export default function BusinessAnalyticsPage() {
 
           <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
             {uploadedDoc && (
-              <div style={{ maxWidth: isMobile ? 36 : 240, width: isMobile ? 36 : "auto", height: isMobile ? 28 : "auto", padding: isMobile ? "0" : "5px 10px", borderRadius: 999, border: `1px solid ${COLORS.border}`, background: COLORS.surfaceRaised, display: "flex", alignItems: "center", justifyContent: "center", gap: 6, color: COLORS.textSecondary, fontSize: 12 }}>
+              <div
+                title={uploadedDoc.summary || uploadedDoc.filename}
+                style={{
+                  maxWidth: isMobile ? 140 : 320,
+                  width: "auto",
+                  minHeight: 28,
+                  padding: isMobile ? "0 8px" : "5px 10px",
+                  borderRadius: 999,
+                  border: `1px solid ${COLORS.border}`,
+                  background: COLORS.surfaceRaised,
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  gap: 6,
+                  color: COLORS.textSecondary,
+                  fontSize: 12,
+                }}
+              >
                 <Icon name="description" size={14} color={COLORS.textSecondary} />
-                {!isMobile && (
-                  <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                    {uploadedDoc.filename.length > 20 ? `${uploadedDoc.filename.slice(0, 20)}...` : uploadedDoc.filename}
-                  </span>
-                )}
+                <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: isMobile ? 72 : 180 }}>
+                  {uploadedDoc.filename.length > (isMobile ? 10 : 24) ? `${uploadedDoc.filename.slice(0, isMobile ? 10 : 24)}...` : uploadedDoc.filename}
+                </span>
+                <button
+                  onClick={removeDocument}
+                  style={{ border: "none", background: "transparent", color: COLORS.textMuted, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", padding: 0 }}
+                  aria-label="Remove active document"
+                >
+                  <Icon name="close" size={14} color="currentColor" />
+                </button>
               </div>
             )}
             {!isMobile && <span style={{ color: COLORS.textMuted, fontSize: 12 }}>{messages.length} messages</span>}
@@ -2731,6 +2811,23 @@ export default function BusinessAnalyticsPage() {
           <div ref={messageScrollRef} style={{ flex: 1, overflowY: "auto", padding: isMobile ? "16px" : isTablet ? "20px 24px" : "24px 40px", paddingBottom: isMobile ? 180 : 130 }}>
             {messages.length === 0 ? (
               <div style={{ paddingTop: isMobile ? 30 : 80, paddingBottom: 60 }}>
+                {uploadedDoc && (
+                  <div style={{ background: "#7c3aed11", border: "1px solid #7c3aed33", borderRadius: 10, padding: "12px 16px", marginBottom: 16, display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10 }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: 10, minWidth: 0 }}>
+                      <Icon name="description" size={16} color="#7c3aed" />
+                      <span style={{ fontSize: 13, color: "#a78bfa", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                        {uploadedDoc.filename} is ready - ask anything about it
+                      </span>
+                    </div>
+                    <button
+                      onClick={removeDocument}
+                      style={{ border: "none", background: "transparent", color: "#a78bfa", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", padding: 0 }}
+                      aria-label="Remove active document"
+                    >
+                      <Icon name="close" size={14} color="currentColor" />
+                    </button>
+                  </div>
+                )}
                 <h1 style={{ margin: "0 0 8px", fontFamily: "Newsreader, Georgia, serif", fontStyle: "italic", fontSize: isMobile ? 28 : 40, fontWeight: 400, color: COLORS.textPrimary }}>
                   {greeting}
                 </h1>
@@ -2767,8 +2864,24 @@ export default function BusinessAnalyticsPage() {
               </div>
             ) : (
               <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+                {uploadedDoc && (
+                  <div style={{ position: "sticky", top: 0, zIndex: 3, alignSelf: "flex-start", marginBottom: 4 }}>
+                    <div style={{ background: "#1a1a24", border: "1px solid #2a2a3a", borderRadius: 999, padding: "5px 10px", fontSize: 11, color: "#8b8b9e", display: "flex", alignItems: "center", gap: 8 }}>
+                      <span>
+                        {`📄 ${uploadedDoc.filename.length > 24 ? `${uploadedDoc.filename.slice(0, 24)}...` : uploadedDoc.filename} · Active`}
+                      </span>
+                      <button
+                        onClick={removeDocument}
+                        style={{ border: "none", background: "transparent", color: "#8b8b9e", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", padding: 0 }}
+                        aria-label="Remove active document"
+                      >
+                        <Icon name="close" size={12} color="currentColor" />
+                      </button>
+                    </div>
+                  </div>
+                )}
                 {messages.map((m, idx) => {
-                  const isCurrentlyStreaming = isStreaming && m.role === "assistant" && idx === messages.length - 1 && !m.isComplete;
+                  const isCurrentlyStreaming = isStreaming && m.role === "assistant" && idx === messages.length - 1 && !completedIds.has(m.id);
                   const isHovered = hoveredMessageId === m.id;
                   const copyKey = `${m.id}-copy`;
                   const copied = copiedId === copyKey;
@@ -2960,6 +3073,12 @@ export default function BusinessAnalyticsPage() {
             )}
 
             <div style={{ position: "relative" }}>
+              {uploadError && (
+                <div style={{ position: "absolute", left: 0, right: 0, bottom: isMobile ? 76 : 82, background: "#dc262622", border: "1px solid #dc2626", borderRadius: 8, padding: "8px 14px", fontSize: 12, color: "#fca5a5" }}>
+                  {uploadError}
+                </div>
+              )}
+
               {showSlashMenu && input.startsWith("/") && (
                 <div style={{ position: "absolute", left: 0, right: 0, bottom: isMobile ? 68 : 74, background: COLORS.surfaceRaised, border: `1px solid ${COLORS.border}`, borderRadius: 10, overflow: "hidden", boxShadow: "0 8px 32px rgba(0,0,0,0.4)", maxHeight: isMobile ? 240 : 280, overflowY: "auto" }}>
                   {filteredSlashCommands.length === 0 ? (
@@ -3008,6 +3127,8 @@ export default function BusinessAnalyticsPage() {
                 <button
                   onClick={() => fileInputRef.current?.click()}
                   title="Upload"
+                  onMouseEnter={() => setShowUploadHint(true)}
+                  onMouseLeave={() => setShowUploadHint(false)}
                   style={{ border: "none", background: "transparent", color: COLORS.textMuted, width: isMobile ? 40 : 22, height: isMobile ? 40 : 22, padding: 0, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center" }}
                 >
                   {isUploading ? (
@@ -3016,6 +3137,12 @@ export default function BusinessAnalyticsPage() {
                     <Icon name="upload" size={18} color={COLORS.textMuted} />
                   )}
                 </button>
+
+                {showUploadHint && !isUploading && (
+                  <div style={{ position: "absolute", left: 6, bottom: isMobile ? 50 : 44, background: COLORS.surfaceRaised, border: `1px solid ${COLORS.border}`, borderRadius: 8, padding: "6px 8px", color: COLORS.textSecondary, fontSize: 11, whiteSpace: "nowrap" }}>
+                    PDF, images, DOCX, TXT · Max 20MB
+                  </div>
+                )}
 
                 <textarea
                   className="ba-input"
@@ -3036,7 +3163,7 @@ export default function BusinessAnalyticsPage() {
                     }
                   }}
                   onKeyDown={handleTextKeyDown}
-                  placeholder="Ask anything..."
+                  placeholder={isUploading ? "Uploading..." : "Ask anything..."}
                   style={{ flex: 1, background: "transparent", border: "none", outline: "none", color: COLORS.textPrimary, fontSize: 12.5, fontFamily: "Manrope, sans-serif", resize: "none", minHeight: 16, maxHeight: 88, lineHeight: 1.45 }}
                 />
 
@@ -3817,7 +3944,7 @@ export default function BusinessAnalyticsPage() {
                   ) : (
                     <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
                       {caseMessages.map((m, idx) => {
-                        const isStreamingAssistant = caseStreaming && m.role === "assistant" && idx === caseMessages.length - 1 && !m.isComplete;
+                        const isStreamingAssistant = caseStreaming && m.role === "assistant" && idx === caseMessages.length - 1 && !caseCompletedIds.has(m.id);
                         if (m.role === "user") {
                           return (
                             <div key={m.id} style={{ display: "flex", flexDirection: "column", alignItems: "flex-end" }}>

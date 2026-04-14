@@ -2,15 +2,22 @@ import hashlib
 import json
 import os
 import re
+import mimetypes
+import tempfile
 import time
 import uuid
 from datetime import datetime
 from pathlib import Path
 from typing import List, Optional, Tuple
 
+try:
+    from google import genai as google_genai
+except Exception:
+    google_genai = None
+
 import google.generativeai as genai
 import httpx
-from fastapi import APIRouter, Depends, File, Header, HTTPException, Query, UploadFile
+from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile
 from langextract import extract as langextract_extract
 from psycopg2.extras import RealDictCursor
 from pydantic import BaseModel
@@ -19,13 +26,25 @@ from qdrant_client.models import Distance, PointStruct, VectorParams
 
 from app.api.auth import get_current_user
 from app.core.config import BA_UPLOAD_DIR, EMBEDDING_SERVICE_URL, GEMINI_API_KEY, GEMINI_MODEL
-from app.core.db import get_db, qdrant_client
+from app.core.db import get_db, get_pg_pool, qdrant_client
 
 router = APIRouter(prefix="/ba/documents", tags=["ba-documents"])
 
 SUPPORTED_EXTENSIONS = {".pdf", ".docx", ".txt", ".jpg", ".jpeg", ".png", ".webp"}
 UPLOAD_BASE_DIR = BA_UPLOAD_DIR
 GEMINI_MODEL_NAME = GEMINI_MODEL
+GEMINI_UPLOAD_MAX_BYTES = 20 * 1024 * 1024
+
+ALLOWED_MIME_TYPES = {
+    "application/pdf",
+    "image/jpeg",
+    "image/jpg",
+    "image/png",
+    "image/webp",
+    "image/gif",
+    "text/plain",
+    "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+}
 
 
 class DocumentSection(BaseModel):
@@ -396,186 +415,272 @@ def _embed_text(text: str) -> Optional[List[float]]:
     return None
 
 
+def _resolve_mime_type(upload: UploadFile) -> str:
+    mime_type = (upload.content_type or "").lower().strip()
+    if not mime_type or mime_type == "application/octet-stream":
+        guessed = mimetypes.guess_type(upload.filename or "")[0]
+        mime_type = (guessed or "").lower().strip()
+    if mime_type == "image/jpg":
+        mime_type = "image/jpeg"
+    return mime_type
+
+
+def _state_name(file_obj) -> str:
+    state = getattr(file_obj, "state", None)
+    if state is None:
+        return ""
+    name = getattr(state, "name", None)
+    if name:
+        return str(name).upper()
+    return str(state).upper()
+
+
+def _upload_to_gemini(path: str, display_name: str, mime_type: str):
+    api_key = os.environ.get("GEMINI_API_KEY") or GEMINI_API_KEY
+    if not api_key:
+        raise HTTPException(status_code=500, detail="GEMINI_API_KEY is not configured")
+
+    if google_genai is not None:
+        try:
+            client = google_genai.Client(api_key=api_key)
+            try:
+                file_obj = client.files.upload(
+                    file=path,
+                    config={"display_name": display_name, "mime_type": mime_type},
+                )
+            except TypeError:
+                file_obj = client.files.upload(file=path, display_name=display_name, mime_type=mime_type)
+            return "google_genai", client, file_obj
+        except Exception:
+            pass
+
+    try:
+        genai.configure(api_key=api_key)
+        file_obj = genai.upload_file(path=path, display_name=display_name, mime_type=mime_type)
+        return "legacy", None, file_obj
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail="Failed to upload file to Gemini") from exc
+
+
+def _refresh_gemini_file(sdk_kind: str, client, gemini_file):
+    file_name = getattr(gemini_file, "name", "")
+    if sdk_kind == "google_genai" and client is not None:
+        try:
+            return client.files.get(name=file_name)
+        except TypeError:
+            return client.files.get(file_name)
+    return genai.get_file(file_name)
+
+
+def _generate_file_summary(sdk_kind: str, client, gemini_file) -> str:
+    model_name = os.environ.get("GEMINI_MODEL", "gemini-3.1-flash-lite-preview")
+    prompt = (
+        "Summarize this document in 2-3 sentences. "
+        "What is it about and what are the key topics covered?"
+    )
+
+    if sdk_kind == "google_genai" and client is not None:
+        try:
+            response = client.models.generate_content(
+                model=model_name,
+                contents=[gemini_file, prompt],
+            )
+            text = getattr(response, "text", "")
+            return (text or "").strip()
+        except Exception:
+            pass
+
+    response = genai.GenerativeModel(model_name).generate_content([gemini_file, prompt])
+    return str(getattr(response, "text", "") or "").strip()
+
+
+def _delete_gemini_file(file_name: str) -> None:
+    api_key = os.environ.get("GEMINI_API_KEY") or GEMINI_API_KEY
+    if not api_key or not file_name:
+        return
+
+    if google_genai is not None:
+        try:
+            client = google_genai.Client(api_key=api_key)
+            try:
+                client.files.delete(name=file_name)
+            except TypeError:
+                client.files.delete(file_name)
+            return
+        except Exception:
+            pass
+
+    try:
+        genai.configure(api_key=api_key)
+        genai.delete_file(file_name)
+    except Exception:
+        pass
+
+
 @router.post("/upload")
 async def upload_document(
     file: UploadFile = File(...),
-    session_id: Optional[str] = Query(None),
-    x_session_id: Optional[str] = Header(None, alias="X-Session-ID"),
-    user=Depends(get_current_user),
+    session_id: str = Query(...),
+    current_user=Depends(get_current_user),
     db=Depends(get_db),
 ):
-    resolved_session_id = (session_id or x_session_id or "").strip() or str(uuid.uuid4())
-    original_filename = _sanitize_filename(file.filename or "")
-    if not original_filename:
-        raise HTTPException(status_code=400, detail="filename is required")
+    resolved_session_id = (session_id or "").strip()
+    if not resolved_session_id:
+        raise HTTPException(status_code=400, detail="session_id is required")
 
-    extension = Path(original_filename).suffix.lower()
-    if extension not in SUPPORTED_EXTENSIONS:
+    original_filename = file.filename or "document"
+    mime_type = _resolve_mime_type(file)
+    if mime_type not in ALLOWED_MIME_TYPES:
         raise HTTPException(status_code=400, detail="Unsupported file type")
-
-    user_id = str(user["id"])
-    _get_or_create_owned_session(resolved_session_id, user_id, db)
-    _ensure_session_memory_column(db)
 
     file_bytes = await file.read()
     if not file_bytes:
         raise HTTPException(status_code=400, detail="Uploaded file is empty")
+    if len(file_bytes) > GEMINI_UPLOAD_MAX_BYTES:
+        raise HTTPException(status_code=400, detail="File too large (max 20MB)")
 
-    upload_dir = _resolve_upload_path(user_id)
-    saved_path = upload_dir / f"{uuid.uuid4()}_{original_filename}"
+    user_id = str(current_user["id"])
+    _get_or_create_owned_session(resolved_session_id, user_id, db)
+    _ensure_session_memory_column(db)
+
+    suffix = Path(original_filename).suffix
+    tmp_path = None
     try:
-        saved_path.write_bytes(file_bytes)
-    except Exception as exc:
-        raise HTTPException(status_code=500, detail="Failed to save uploaded file") from exc
+        with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
+            tmp.write(file_bytes)
+            tmp_path = tmp.name
 
-    doc_id = hashlib.md5(f"{user_id}_{original_filename}".encode()).hexdigest()
+        sdk_kind, client, gemini_file = _upload_to_gemini(tmp_path, original_filename, mime_type)
 
-    extracted_doc = _extract_with_langextract(saved_path, original_filename)
-    chunks = _build_chunks(extracted_doc, doc_id, original_filename)
-    if not chunks:
-        raise HTTPException(status_code=400, detail="No indexable content found in document")
+        max_wait = 30
+        waited = 0
+        state = _state_name(gemini_file)
+        while state == "PROCESSING":
+            if waited >= max_wait:
+                raise HTTPException(status_code=500, detail="File processing timed out")
+            time.sleep(2)
+            waited += 2
+            gemini_file = _refresh_gemini_file(sdk_kind, client, gemini_file)
+            state = _state_name(gemini_file)
 
-    first_embedding = _embed_text(chunks[0]["text"])
-    if not first_embedding:
-        raise HTTPException(status_code=502, detail="Failed to generate embeddings")
+        if state == "FAILED":
+            raise HTTPException(status_code=500, detail="File processing failed")
 
-    base_collection = f"ba_user_{user_id}"
-    collection_name = _resolve_personal_collection(base_collection, len(first_embedding))
+        summary = _generate_file_summary(sdk_kind, client, gemini_file)
+        doc_id = str(uuid.uuid4())
+        uploaded_at = datetime.utcnow().isoformat()
 
-    _delete_existing_doc_points(collection_name, doc_id)
-
-    with db.cursor() as cur:
-        cur.execute(
-            """
-            DELETE FROM chunks
-            WHERE metadata->>'source' = 'student_upload'
-              AND metadata->>'user_id' = %s
-              AND metadata->>'doc_id' = %s
-            """,
-            (user_id, doc_id),
-        )
-        db.commit()
-
-    uploaded_at = datetime.utcnow().isoformat()
-
-    points: List[PointStruct] = []
-    inserted_rows = []
-
-    for chunk in chunks:
-        embedding = first_embedding if chunk["chunk_index"] == 0 else _embed_text(chunk["text"])
-        if not embedding:
-            continue
-
-        point_id = str(uuid.uuid4())
-        points.append(
-            PointStruct(
-                id=point_id,
-                vector=embedding,
-                payload={
-                    "text": chunk["text"],
-                    "content": chunk["text"],
-                    "chunk_index": chunk["chunk_index"],
-                    "filename": chunk["filename"],
-                    "doc_title": chunk["filename"],
-                    "doc_id": doc_id,
-                    "user_id": user_id,
-                    "owner_user_id": user_id,
-                    "section_title": chunk["section_title"],
-                    "page_number": chunk["page_number"],
-                    "has_table": chunk["has_table"],
-                    "has_formula": chunk["has_formula"],
-                    "uploaded_at": uploaded_at,
-                },
-            )
-        )
-
-        inserted_rows.append((chunk, point_id))
-
-    if not points:
-        raise HTTPException(status_code=502, detail="Embedding generation failed for all chunks")
-
-    try:
-        qdrant_client.upsert(collection_name=collection_name, points=points, wait=True)
-    except Exception as exc:
-        raise HTTPException(status_code=500, detail=f"Qdrant upsert failed: {str(exc)}") from exc
-
-    with db.cursor() as cur:
-        for chunk, point_id in inserted_rows:
+        with db.cursor(cursor_factory=RealDictCursor) as cur:
+            # Create session if it doesn't exist yet
             cur.execute(
                 """
-                INSERT INTO chunks (chunk_index, content, token_count, vector_id, status, metadata)
-                VALUES (%s, %s, %s, %s, 'synced', %s::jsonb)
+                INSERT INTO chat_sessions (id, user_id, title)
+                VALUES (%s::uuid, %s::uuid, %s)
+                ON CONFLICT (id) DO NOTHING
                 """,
-                (
-                    chunk["chunk_index"],
-                    chunk["text"],
-                    len(chunk["text"].split()),
-                    point_id,
-                    json.dumps(
-                        {
-                            "source": "student_upload",
-                            "user_id": user_id,
-                            "filename": original_filename,
-                            "doc_id": doc_id,
-                            "collection": collection_name,
-                            "section_title": chunk["section_title"],
-                            "has_table": chunk["has_table"],
-                            "has_formula": chunk["has_formula"],
-                        }
-                    ),
-                ),
+                (resolved_session_id, user_id, f"Chat with {original_filename[:40]}"),
             )
 
+            # Now read existing memory (may be empty for new session)
+            cur.execute(
+                "SELECT session_memory FROM chat_sessions WHERE id = %s::uuid",
+                (resolved_session_id,),
+            )
+            row = cur.fetchone()
+            session_memory = {}
+            if row and row["session_memory"]:
+                sm = row["session_memory"]
+                session_memory = json.loads(sm) if isinstance(sm, str) else (sm or {})
+
+            if not isinstance(session_memory, dict):
+                session_memory = {}
+
+            uploaded_files = session_memory.get("uploaded_files", [])
+            if not isinstance(uploaded_files, list):
+                uploaded_files = []
+
+            uploaded_files.append(
+                {
+                    "doc_id": doc_id,
+                    "filename": original_filename,
+                    "gemini_file_uri": getattr(gemini_file, "uri", None),
+                    "gemini_file_name": getattr(gemini_file, "name", None),
+                    "mime_type": mime_type,
+                    "summary": summary,
+                    "uploaded_at": uploaded_at,
+                }
+            )
+            session_memory["uploaded_files"] = uploaded_files
+            session_memory["active_doc"] = {
+                "doc_id": doc_id,
+                "filename": original_filename,
+                "gemini_file_uri": getattr(gemini_file, "uri", None),
+                "gemini_file_name": getattr(gemini_file, "name", None),
+                "mime_type": mime_type,
+                "summary": summary,
+            }
+
+            cur.execute(
+                "UPDATE chat_sessions SET session_memory = %s::jsonb WHERE id = %s::uuid",
+                (json.dumps(session_memory), resolved_session_id),
+            )
+            db.commit()
+
+        return {
+            "doc_id": doc_id,
+            "filename": original_filename,
+            "summary": summary,
+            "gemini_file_name": getattr(gemini_file, "name", ""),
+            "status": "ready",
+        }
+    finally:
+        if tmp_path:
+            try:
+                os.unlink(tmp_path)
+            except Exception:
+                pass
+
+
+@router.delete("/active")
+async def remove_active_document(
+    session_id: str = Query(...),
+    current_user=Depends(get_current_user),
+    db=Depends(get_db),
+):
+    user_id = str(current_user["id"])
+
+    with db.cursor(cursor_factory=RealDictCursor) as cur:
         cur.execute(
-            "SELECT session_memory FROM chat_sessions WHERE id = %s::uuid",
-            (resolved_session_id,),
+            "SELECT session_memory FROM chat_sessions WHERE id = %s::uuid AND user_id = %s::uuid",
+            (session_id, user_id),
         )
         row = cur.fetchone()
-        existing = (row["session_memory"] if row else None) or {}
-        if isinstance(existing, str):
+        if not row:
+            raise HTTPException(status_code=404, detail="Session not found")
+
+        sm = row.get("session_memory") or {}
+        if isinstance(sm, str):
             try:
-                existing = json.loads(existing)
+                sm = json.loads(sm)
             except Exception:
-                existing = {}
+                sm = {}
+        if not isinstance(sm, dict):
+            sm = {}
 
-        existing["uploaded_collection"] = collection_name
-        files = existing.get("uploaded_files", [])
-        if not isinstance(files, list):
-            files = []
+        active = sm.get("active_doc", {}) if isinstance(sm.get("active_doc"), dict) else {}
+        file_name = str(active.get("gemini_file_name") or "")
+        if file_name:
+            _delete_gemini_file(file_name)
 
-        existing_entry = next((f for f in files if f.get("doc_id") == doc_id), None)
-        payload_file = {
-            "filename": original_filename,
-            "doc_id": doc_id,
-            "chunk_count": len(inserted_rows),
-            "uploaded_at": uploaded_at,
-            "summary": extracted_doc.summary,
-            "key_terms": extracted_doc.key_terms[:10],
-        }
-
-        if existing_entry:
-            existing_entry.update(payload_file)
-        else:
-            files.append(payload_file)
-
-        existing["uploaded_files"] = files
+        sm.pop("active_doc", None)
 
         cur.execute(
             "UPDATE chat_sessions SET session_memory = %s::jsonb WHERE id = %s::uuid",
-            (json.dumps(existing), resolved_session_id),
+            (json.dumps(sm), session_id),
         )
         db.commit()
 
-    return {
-        "session_id": resolved_session_id,
-        "collection_id": collection_name,
-        "doc_id": doc_id,
-        "chunk_count": len(inserted_rows),
-        "filename": original_filename,
-        "summary": extracted_doc.summary,
-        "key_terms": extracted_doc.key_terms[:10],
-        "section_count": len(extracted_doc.sections),
-    }
+    return {"status": "removed"}
 
 
 @router.get("/session/{session_id}")

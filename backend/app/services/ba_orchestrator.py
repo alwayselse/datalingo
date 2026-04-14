@@ -16,6 +16,52 @@ from app.services.ba_memory_service import (
 )
 
 
+def get_active_doc(session_id: str) -> dict | None:
+    """Fetches active doc metadata from session memory."""
+    from app.core.db import get_pg_pool
+    from psycopg2.extras import RealDictCursor
+
+    pool = get_pg_pool()
+    conn = pool.getconn()
+    try:
+        with conn.cursor(cursor_factory=RealDictCursor) as cur:
+            cur.execute(
+                "SELECT session_memory FROM chat_sessions WHERE id = %s::uuid",
+                (session_id,),
+            )
+            row = cur.fetchone()
+            if not row or not row.get("session_memory"):
+                return None
+
+            sm = row["session_memory"]
+            if isinstance(sm, str):
+                sm = json.loads(sm)
+            if not isinstance(sm, dict):
+                return None
+
+            active_doc = sm.get("active_doc")
+            if not isinstance(active_doc, dict):
+                return None
+
+            gemini_file_name = str(active_doc.get("gemini_file_name") or "")
+            if not gemini_file_name:
+                return None
+
+            try:
+                genai.configure(api_key=os.environ["GEMINI_API_KEY"])
+                file_obj = genai.get_file(gemini_file_name)
+                if str(getattr(getattr(file_obj, "state", None), "name", "")).upper() != "ACTIVE":
+                    return None
+            except Exception:
+                return None
+
+            return active_doc
+    except Exception:
+        return None
+    finally:
+        pool.putconn(conn)
+
+
 async def memory_agent(user_id: str, topic_id: str, query: str) -> dict:
     """
     Fetches MemPalace context for student + topic.
@@ -292,6 +338,7 @@ async def response_agent(
     rag_result: dict,
     tool_result: dict,
     session_messages: list,
+    active_doc: dict | None = None,
 ) -> AsyncGenerator[str, None]:
     """Synthesizes all context and streams response via Gemini."""
     genai.configure(api_key=os.environ["GEMINI_API_KEY"])
@@ -370,6 +417,12 @@ Generate a pre-class brief for this topic. Structure:
 4. Key formula or framework to remember
 Keep it under 250 words. Be direct and practical.
 """
+    elif tool == "doc":
+        tool_instruction = """
+The student is asking specifically about their uploaded document.
+Prioritize the uploaded document context over general knowledge.
+If the answer is not present in the document, say that clearly.
+"""
     elif suggest:
         tool_instruction = f"""
 After your explanation, naturally suggest the student
@@ -428,8 +481,28 @@ Student's message: {message}"""
     model = genai.GenerativeModel(model_name=model_name, system_instruction=system_prompt)
 
     try:
+        content_parts = []
+        if active_doc and active_doc.get("gemini_file_name"):
+            try:
+                gemini_file = genai.get_file(active_doc["gemini_file_name"])
+                if str(getattr(getattr(gemini_file, "state", None), "name", "")).upper() == "ACTIVE":
+                    content_parts.append(gemini_file)
+                    user_prompt = (
+                        user_prompt
+                        + "\n\nThe student has uploaded a document: "
+                        + f"'{active_doc.get('filename', 'uploaded file')}'. "
+                        + "It has been provided above as context. "
+                        + "When relevant, answer using the document. "
+                        + "If the question is specifically about the document, "
+                        + "prioritize document content over general knowledge."
+                    )
+            except Exception as exc:
+                print(f"[ResponseAgent] doc fetch failed: {exc}")
+
+        content_parts.append(user_prompt)
+
         response = model.generate_content(
-            user_prompt,
+            content_parts,
             stream=True,
             generation_config=genai.types.GenerationConfig(
                 temperature=0.7,
@@ -473,6 +546,9 @@ async def run_ba_pipeline(
             doc_filter=tool_result.get("doc_filter"),
         )
 
+    loop = asyncio.get_event_loop()
+    active_doc = await loop.run_in_executor(None, get_active_doc, session_id)
+
     print(f"[BA Pipeline] agents completed in {(time.time() - start) * 1000:.0f}ms")
 
     tool = tool_result.get("tool")
@@ -498,6 +574,7 @@ async def run_ba_pipeline(
         rag_result=rag_result,
         tool_result=tool_result,
         session_messages=session_messages,
+        active_doc=active_doc,
     ):
         yield token
 

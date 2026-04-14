@@ -535,6 +535,19 @@ def chat(
         if is_ba_student:
             from app.services.ba_orchestrator import run_ba_pipeline
 
+            lower_message = (body.message or "").lower().strip()
+            is_doc_only_request = lower_message.startswith("/doc") or "[doc_only" in lower_message
+            if is_doc_only_request:
+                session_memory = _get_session_memory(session_id, db)
+                active_doc = session_memory.get("active_doc") if isinstance(session_memory, dict) else None
+                if not active_doc:
+                    warning = "No document uploaded yet. Use the paperclip to upload a file first."
+                    full_response.append(warning)
+                    yield f"data: {warning}\n\n"
+                    _save_message(session_id, user_id, "assistant", warning, [], db)
+                    yield "data: [DONE]\n\n"
+                    return
+
             session_msgs = []
             try:
                 with db.cursor(cursor_factory=RealDictCursor) as cur:
@@ -571,7 +584,8 @@ def chat(
                     continue
 
                 full_response.append(token)
-                yield f"data: {token}\n\n"
+                # Wrap token in JSON so embedded newlines remain valid SSE payload.
+                yield _sse(json.dumps({"token": token}))
 
             final = "".join(full_response)
             _save_message(session_id, user_id, "assistant", final, [], db)
