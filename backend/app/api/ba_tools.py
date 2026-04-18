@@ -263,17 +263,21 @@ Return ONLY valid JSON:
         response = model.generate_content(prompt)
         result = _extract_json_payload(getattr(response, "text", "") or "")
 
-        loop = asyncio.get_event_loop()
-        await loop.run_in_executor(
-            None,
-            write_fragment,
-            str(current_user["id"]),
-            topic_id,
-            "forge_attempt",
-            f"Exam score {result.get('score', 0)}/100: {body.answer[:150]}",
-            body.session_id,
-            {"score": result.get("score", 0), "type": "exam"},
-        )
+        # Memory logging should never block returning the grade to the student.
+        try:
+            loop = asyncio.get_event_loop()
+            await loop.run_in_executor(
+                None,
+                write_fragment,
+                str(current_user["id"]),
+                topic_id,
+                "forge_attempt",
+                f"Exam score {result.get('score', 0)}/100: {body.answer[:150]}",
+                body.session_id,
+                {"score": result.get("score", 0), "type": "exam"},
+            )
+        except Exception:
+            pass
 
         return result
     except Exception as exc:

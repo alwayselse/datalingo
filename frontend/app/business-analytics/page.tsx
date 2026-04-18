@@ -171,29 +171,29 @@ const TOOL_LABELS: Record<ToolKey, string> = {
 };
 
 const BA_TOPICS = [
-  "Business Analytics Frameworks & Decision-Making",
-  "Customer Data & Analytics Lifecycle",
-  "Data Extraction & Analytics",
-  "Data Visualization & Dashboards",
-  "RFM Analysis",
-  "Customer Segmentation & CLV",
-  "Causality in Business Analytics",
-  "Experimental Design & RCTs",
-  "A/B Testing & Hypothesis Testing",
-  "Pricing Analytics & Revenue Mgmt",
-  "Price Elasticity & Demand Sensitivity",
-  "Promotion & Offer Optimization",
-  "Time Series Data & Business Applications",
-  "Trend, Seasonality & Cycles",
-  "Forecasting Methods (MA, ES, ARIMA)",
-  "Customer Retention & Churn Analytics",
-  "Inventory Control & Demand Planning",
-  "Supply Chain Analytics & KPIs",
-  "Text & Sentiment Analysis",
-  "Advanced Experimentation & Multivariate Testing",
-  "Ethics, Bias & Responsible Analytics",
-  "Data Privacy & Governance",
-  "Capstone Project",
+  { id: "ba_frameworks", label: "Business Analytics Frameworks & Decision-Making" },
+  { id: "customer_data", label: "Customer Data & Analytics Lifecycle" },
+  { id: "data_extraction", label: "Data Extraction & Analytics" },
+  { id: "data_viz_dashboards", label: "Data Visualization & Dashboards" },
+  { id: "rfm_analysis", label: "RFM Analysis" },
+  { id: "customer_seg_clv", label: "Customer Segmentation & CLV" },
+  { id: "causality_ba", label: "Causality in Business Analytics" },
+  { id: "experimental_design", label: "Experimental Design & RCTs" },
+  { id: "ab_testing", label: "A/B Testing & Hypothesis Testing" },
+  { id: "pricing_analytics", label: "Pricing Analytics & Revenue Mgmt" },
+  { id: "price_elasticity", label: "Price Elasticity & Demand Sensitivity" },
+  { id: "promo_optimization", label: "Promotion & Offer Optimization" },
+  { id: "time_series_ba", label: "Time Series Data & Business Applications" },
+  { id: "trend_seasonality", label: "Trend, Seasonality & Cycles" },
+  { id: "forecasting_methods", label: "Forecasting Methods (MA, ES, ARIMA)" },
+  { id: "churn_analytics", label: "Customer Retention & Churn Analytics" },
+  { id: "inventory_control", label: "Inventory Control & Demand Planning" },
+  { id: "supply_chain_kpis", label: "Supply Chain Analytics & KPIs" },
+  { id: "text_sentiment", label: "Text & Sentiment Analysis" },
+  { id: "multivariate_testing", label: "Advanced Experimentation & Multivariate Testing" },
+  { id: "ethics_bias", label: "Ethics, Bias & Responsible Analytics" },
+  { id: "data_privacy", label: "Data Privacy & Governance" },
+  { id: "ba_capstone", label: "Capstone Project" },
 ];
 
 const CUSTOM_FORGE_TOPIC_VALUE = "__custom_topic__";
@@ -1344,7 +1344,7 @@ export default function BusinessAnalyticsPage() {
   const [hoveredMessageId, setHoveredMessageId] = useState<string | null>(null);
   const [completedIds, setCompletedIds] = useState<Set<string>>(new Set());
 
-  const [forgeTopic, setForgeTopic] = useState(BA_TOPICS[0]);
+  const [forgeTopic, setForgeTopic] = useState(BA_TOPICS[0].id);
   const [forgeCustomTopic, setForgeCustomTopic] = useState("");
   const [forgeExplanation, setForgeExplanation] = useState("");
   const [forgeLoading, setForgeLoading] = useState(false);
@@ -1358,7 +1358,7 @@ export default function BusinessAnalyticsPage() {
   const [caseAbortController, setCaseAbortController] = useState<AbortController | null>(null);
   const [caseMobileTab, setCaseMobileTab] = useState<"case" | "chat">("case");
 
-  const [examTopic, setExamTopic] = useState(BA_TOPICS[0]);
+  const [examTopic, setExamTopic] = useState(BA_TOPICS[0].id);
   const [examDifficulty, setExamDifficulty] = useState("intermediate");
   const [examLoading, setExamLoading] = useState(false);
   const [examQuestion, setExamQuestion] = useState<ExamQuestionData | null>(null);
@@ -1367,7 +1367,7 @@ export default function BusinessAnalyticsPage() {
   const [examHintsOpen, setExamHintsOpen] = useState(false);
   const [examModelHintsOpen, setExamModelHintsOpen] = useState(false);
 
-  const [briefTopic, setBriefTopic] = useState(BA_TOPICS[0]);
+  const [briefTopic, setBriefTopic] = useState(BA_TOPICS[0].id);
   const [briefLoading, setBriefLoading] = useState(false);
   const [briefData, setBriefData] = useState<BriefData | null>(null);
 
@@ -2308,8 +2308,8 @@ export default function BusinessAnalyticsPage() {
   }, [uploadFile]);
 
   const runForgeEvaluation = useCallback(async () => {
-    const selectedTopicLabel = forgeTopic === CUSTOM_FORGE_TOPIC_VALUE ? forgeCustomTopic.trim() : forgeTopic;
-    if (!forgeExplanation.trim() || !selectedTopicLabel || !token) return;
+    const selectedTopicId = forgeTopic === CUSTOM_FORGE_TOPIC_VALUE ? toTopicId(forgeCustomTopic.trim()) : forgeTopic;
+    if (!forgeExplanation.trim() || !selectedTopicId || !token) return;
     setForgeLoading(true);
     setForgeResult(null);
 
@@ -2321,7 +2321,7 @@ export default function BusinessAnalyticsPage() {
           Authorization: `Bearer ${token}`,
         },
         body: JSON.stringify({
-          topic_id: toTopicId(selectedTopicLabel),
+          topic_id: selectedTopicId,
           explanation: forgeExplanation,
           session_id: sessionIdRef.current || sessionId || "",
         }),
@@ -2361,7 +2361,7 @@ export default function BusinessAnalyticsPage() {
           Authorization: `Bearer ${token}`,
         },
         body: JSON.stringify({
-          topic_id: toTopicId(examTopic),
+          topic_id: examTopic,
           difficulty: examDifficulty,
           session_id: sessionIdRef.current || sessionId || "",
         }),
@@ -2379,7 +2379,7 @@ export default function BusinessAnalyticsPage() {
     } finally {
       setExamLoading(false);
     }
-  }, [API, examDifficulty, examTopic, sessionId, toTopicId, token]);
+  }, [API, examDifficulty, examTopic, sessionId, token]);
 
   const submitExamAnswer = useCallback(async () => {
     if (!token || !examAnswer.trim() || !examQuestion?.question) return;
@@ -2393,7 +2393,7 @@ export default function BusinessAnalyticsPage() {
           Authorization: `Bearer ${token}`,
         },
         body: JSON.stringify({
-          topic_id: toTopicId(examTopic),
+          topic_id: examTopic,
           question: examQuestion.question,
           answer: examAnswer,
           session_id: sessionIdRef.current || sessionId || "",
@@ -2416,7 +2416,7 @@ export default function BusinessAnalyticsPage() {
     } finally {
       setExamLoading(false);
     }
-  }, [API, examAnswer, examQuestion, examTopic, sessionId, toTopicId, token]);
+  }, [API, examAnswer, examQuestion, examTopic, sessionId, token]);
 
   const runBrief = useCallback(async () => {
     if (!token) return;
@@ -2430,7 +2430,7 @@ export default function BusinessAnalyticsPage() {
           Authorization: `Bearer ${token}`,
         },
         body: JSON.stringify({
-          topic_id: toTopicId(briefTopic),
+          topic_id: briefTopic,
           session_id: sessionIdRef.current || sessionId || "",
         }),
       });
@@ -2443,7 +2443,7 @@ export default function BusinessAnalyticsPage() {
     } finally {
       setBriefLoading(false);
     }
-  }, [API, briefTopic, sessionId, toTopicId, token]);
+  }, [API, briefTopic, sessionId, token]);
 
   const formulaState = useMemo(() => {
     const r = 5;
@@ -3464,7 +3464,7 @@ export default function BusinessAnalyticsPage() {
                 <div>
                   <label style={{ display: "block", fontSize: 12, color: COLORS.textSecondary, marginBottom: 6 }}>Pick a topic</label>
                   <select value={forgeTopic} onChange={(e) => setForgeTopic(e.target.value)} style={{ width: "100%", background: COLORS.surfaceRaised, border: `1px solid ${COLORS.border}`, color: COLORS.textPrimary, borderRadius: 8, padding: "8px 12px", marginBottom: 14 }}>
-                    {BA_TOPICS.map((t) => <option key={t} value={t}>{t}</option>)}
+                    {BA_TOPICS.map((t) => <option key={t.id} value={t.id}>{t.label}</option>)}
                     <option value={CUSTOM_FORGE_TOPIC_VALUE}>Custom topic...</option>
                   </select>
 
@@ -3683,7 +3683,7 @@ export default function BusinessAnalyticsPage() {
                 <div>
                   <label style={{ display: "block", fontSize: 12, color: COLORS.textSecondary, marginBottom: 6 }}>Topic</label>
                   <select value={examTopic} onChange={(e) => setExamTopic(e.target.value)} style={{ width: "100%", background: COLORS.surfaceRaised, border: `1px solid ${COLORS.border}`, color: COLORS.textPrimary, borderRadius: 8, padding: "8px 12px", marginBottom: 12 }}>
-                    {BA_TOPICS.map((t) => <option key={t} value={t}>{t}</option>)}
+                    {BA_TOPICS.map((t) => <option key={t.id} value={t.id}>{t.label}</option>)}
                   </select>
 
                   <label style={{ display: "block", fontSize: 12, color: COLORS.textSecondary, marginBottom: 6 }}>Difficulty</label>
@@ -3790,7 +3790,7 @@ export default function BusinessAnalyticsPage() {
                 <div>
                   <label style={{ display: "block", fontSize: 12, color: COLORS.textSecondary, marginBottom: 6 }}>Topic</label>
                   <select value={briefTopic} onChange={(e) => setBriefTopic(e.target.value)} style={{ width: "100%", background: COLORS.surfaceRaised, border: `1px solid ${COLORS.border}`, color: COLORS.textPrimary, borderRadius: 8, padding: "8px 12px", marginBottom: 12 }}>
-                    {BA_TOPICS.map((t) => <option key={t} value={t}>{t}</option>)}
+                    {BA_TOPICS.map((t) => <option key={t.id} value={t.id}>{t.label}</option>)}
                   </select>
 
                   <button onClick={runBrief} style={{ width: "100%", background: COLORS.primary, color: "#fff", border: "none", borderRadius: 8, padding: 10, fontWeight: 600, cursor: "pointer", marginBottom: 12 }}>
