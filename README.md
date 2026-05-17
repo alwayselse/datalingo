@@ -237,11 +237,12 @@ flowchart LR
 ## 9. Screenshots
 
 > Add product screenshots/GIFs here.
-
-- `![Student Chat](./docs/screenshots/student-chat.png)`
-- `![BA Workspace](./docs/screenshots/ba-workspace.png)`
-- `![Teacher Dashboard](./docs/screenshots/teacher-dashboard.png)`
-- `![Admin Dashboard](./docs/screenshots/admin-dashboard.png)`
+<img width="1919" height="992" alt="Screenshot 2026-05-10 114925" src="https://github.com/user-attachments/assets/6ae333a4-73d2-4941-8ce6-4aba949351e5" />
+<img width="1919" height="986" alt="Screenshot 2026-05-10 113934" src="https://github.com/user-attachments/assets/530ce479-0e4f-43c1-9f54-deeb6803cd14" />
+<img width="1907" height="978" alt="Screenshot 2026-05-10 112532" src="https://github.com/user-attachments/assets/ea251a0e-b058-4dcf-9d70-9f69dc56ce3c" />
+<img width="1916" height="969" alt="Screenshot 2026-05-10 112610" src="https://github.com/user-attachments/assets/a6acdcd7-c6cd-40c7-bd2d-485a8189b2e8" />
+<img width="1919" height="983" alt="Screenshot 2026-05-10 114002" src="https://github.com/user-attachments/assets/99e94fcd-fc34-416a-99b2-2df3ba7dcc7c" />
+<img width="1916" height="982" alt="Screenshot 2026-05-10 112634" src="https://github.com/user-attachments/assets/61d9a3c3-aa8b-483d-bb60-a8162e769b48" />
 
 ---
 
