@@ -256,7 +256,7 @@ cd datalingo
 
 ### 2) Backend setup
 ```bash
-cd /home/runner/work/datalingo/datalingo/backend
+cd ./backendbackend
 python -m venv .venv
 source .venv/bin/activate  # Windows: .venv\Scripts\activate
 pip install -r requirements.txt
@@ -264,7 +264,7 @@ pip install -r requirements.txt
 
 ### 3) Frontend setup
 ```bash
-cd /home/runner/work/datalingo/datalingo/frontend
+cd ./frontend
 npm ci
 ```
 
@@ -272,7 +272,7 @@ npm ci
 Create `.env` at:
 
 ```text
-/home/runner/work/datalingo/datalingo/.env
+.env
 ```
 
 (Use the table in **Environment Variables** below.)
@@ -281,14 +281,14 @@ Create `.env` at:
 
 Backend:
 ```bash
-cd /home/runner/work/datalingo/datalingo/backend
+cd ./backend
 source .venv/bin/activate
 uvicorn app.main:app --host 127.0.0.1 --port 8000 --reload
 ```
 
 Frontend:
 ```bash
-cd /home/runner/work/datalingo/datalingo/frontend
+cd ./frontend
 npm run dev
 ```
 
@@ -331,7 +331,7 @@ npm run dev
 Datalingo is set up for VPS-style deployment with PM2 process supervision.
 
 ### PM2 Process Layout
-Defined in `/home/runner/work/datalingo/datalingo/ecosystem.config.js`:
+Defined in `./ecosystem.config.js`:
 
 - `datalingo-backend`: Uvicorn + FastAPI
 - `datalingo-frontend`: Next.js `start`
