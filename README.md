@@ -380,12 +380,6 @@ Contributions are welcome.
 
 ---
 
-## 16. License
-
-This project is currently unlicensed in the repository. Add a `LICENSE` file to define usage terms.
-
----
-
-## 17. Author
+## 16. Author
 
 Built by **Nikhil Jha**.
